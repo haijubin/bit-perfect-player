@@ -35,8 +35,11 @@ function App() {
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
 
+  // LIFECYCLE: Load everything on boot
   useEffect(() => {
     loadLibrary();
+    loadPaths(); // <--- CRITICAL: Fetch persisted paths from DB
+    
     const unlisten = listen<number>("progress", (event) => {
       setProgress(event.payload);
     });
@@ -52,8 +55,18 @@ function App() {
   const loadLibrary = async () => {
     try {
       const tracks = await invoke<Track[]>("get_library");
-      setLibrary(tracks);
+      setLibrary(tracks || []);
     } catch (err) { console.error(err); }
+  };
+
+  // NEW: Fetch paths from the Rust backend
+  const loadPaths = async () => {
+    try {
+      const paths = await invoke<string[]>("get_library_paths");
+      setLibraryPaths(paths || []);
+    } catch (err) {
+      console.error("Could not load library paths:", err);
+    }
   };
 
   const handleRescan = async () => {
@@ -69,9 +82,9 @@ function App() {
     try {
       const selected = await open({ directory: true });
       if (selected && !libraryPaths.includes(selected as string)) {
-        setLibraryPaths(prev => [...prev, selected as string]);
         setStatus("Scanning new path...");
-        await invoke("scan_music_folder", { folderPath: selected });
+        await invoke("scan_music_folder", { folderPath: selected as string });
+        await loadPaths(); // <--- Refresh list from DB
         await loadLibrary();
         setStatus("Library updated");
       }
@@ -82,7 +95,7 @@ function App() {
     setStatus(`Removing ${pathToRemove}...`);
     try {
       await invoke("remove_music_path", { folderPath: pathToRemove });
-      setLibraryPaths(prev => prev.filter(p => p !== pathToRemove));
+      await loadPaths(); // <--- Refresh list from DB
       await loadLibrary();
       setStatus("Path removed and library cleaned");
     } catch (err) {

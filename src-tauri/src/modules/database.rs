@@ -24,6 +24,15 @@ pub fn init_db() -> Result<()> {
         )",
         [],
     )?;
+
+// 2. Create library_paths table 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS library_paths (
+            path TEXT PRIMARY KEY
+        )",
+        [],
+    )?;
+
     Ok(())
 }
 

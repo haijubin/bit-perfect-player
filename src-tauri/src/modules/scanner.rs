@@ -64,6 +64,13 @@ pub fn get_library() -> Result<Vec<Track>, String> {
 
 #[tauri::command]
 pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Vec<Track>, String> {
+    let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
+
+    // SAVE THE PATH TO DB SO IT PERSISTS ON RESTART
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO library_paths (path) VALUES (?1)",
+        [&folder_path],
+    );
     let scope = app.fs_scope();
     let _ = scope.allow_directory(&folder_path, true);
     let conn = init_db();
@@ -137,18 +144,20 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
 }
 
 #[tauri::command]
-pub async fn remove_music_path(folder_path: String) -> Result<(), String> {
-    // Access the now-exported get_db_connection
-    let conn = crate::modules::database::get_db_connection()
-        .map_err(|e| format!("Database connection error: {}", e))?;
+pub fn remove_music_path(folder_path: String) -> Result<(), String> {
+    let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
 
-    let pattern = format!("{}%", folder_path);
-
+    // 1. Remove the tracks that start with this path
     conn.execute(
-        "DELETE FROM tracks WHERE file_path LIKE ?",
-        [pattern],
-    ).map_err(|e| format!("Failed to delete tracks: {}", e))?;
+        "DELETE FROM tracks WHERE file_path LIKE ?1 || '%'",
+        [&folder_path],
+    ).map_err(|e| e.to_string())?;
 
-    println!("Purged tracks starting with: {}", folder_path);
+    // 2. CRITICAL: Remove the path itself from the configuration table
+    conn.execute(
+        "DELETE FROM library_paths WHERE path = ?1",
+        [&folder_path],
+    ).map_err(|e| e.to_string())?;
+
     Ok(())
 }
