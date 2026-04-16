@@ -16,7 +16,6 @@ pub struct PlayerState {
     pub is_playing: Arc<Mutex<bool>>,
 }
 
-// Manually defining what "Default" looks like for your state
 impl Default for PlayerState {
     fn default() -> Self {
         Self {
@@ -30,10 +29,15 @@ impl Default for PlayerState {
 #[tauri::command]
 pub fn start_bit_perfect_stream(
     file_path: String,
+    replay_gain: Option<f32>, // Added this parameter
     state: tauri::State<'_, PlayerState>,
     window: tauri::Window,
 ) -> Result<String, String> {
     state.elapsed_samples.store(0, Ordering::SeqCst);
+
+    // 1. Calculate the ReplayGain Multiplier
+    // Formula: 10^(dB/20). If no gain provided, multiplier is 1.0 (no change)
+    let multiplier = replay_gain.map(|db| 10f32.powf(db / 20.0)).unwrap_or(1.0);
 
     let src = std::fs::File::open(&file_path).map_err(|e| e.to_string())?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
@@ -73,11 +77,13 @@ pub fn start_bit_perfect_stream(
 
     stream.play().map_err(|e| e.to_string())?;
     *state.active_stream.lock().unwrap() = Some(stream);
+    *state.is_playing.lock().unwrap() = true;
 
     let elapsed_for_emitter = Arc::clone(&state.elapsed_samples);
     std::thread::spawn(move || {
         loop {
             let elapsed = elapsed_for_emitter.load(Ordering::SeqCst);
+            // Assuming stereo (2.0)
             let seconds = (elapsed as f32 / 2.0) / sample_rate;
             let _ = window.emit("progress", seconds);
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -99,11 +105,19 @@ pub fn start_bit_perfect_stream(
                 }
                 if let Some(buf) = sample_buf.as_mut() {
                     buf.copy_interleaved_ref(decoded);
-                    let samples = buf.samples();
+                    
+                    // 2. Apply ReplayGain multiplier to the decoded samples
+                    let mut samples = buf.samples().to_vec();
+                    if multiplier != 1.0 {
+                        for sample in samples.iter_mut() {
+                            *sample *= multiplier;
+                        }
+                    }
+
                     let mut i = 0;
                     while i < samples.len() {
                         let written = producer.write(&samples[i..]).unwrap_or(0);
-                        if written == 0 {  std::thread::yield_now(); }
+                        if written == 0 { std::thread::yield_now(); }
                         i += written;
                     }
                 }
@@ -121,11 +135,9 @@ pub fn toggle_playback(state: tauri::State<'_, PlayerState>) -> Result<bool, Str
     
     if let Some(stream) = stream_lock.as_ref() {
         if *playing_lock {
-            // If currently playing, pause it
             stream.pause().map_err(|e| e.to_string())?;
             *playing_lock = false;
         } else {
-            // If currently paused, play it
             stream.play().map_err(|e| e.to_string())?;
             *playing_lock = true;
         }

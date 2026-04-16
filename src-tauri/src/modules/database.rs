@@ -33,6 +33,16 @@ pub fn init_db() -> Result<()> {
         [],
     )?;
 
+conn.execute(
+    "CREATE TABLE IF NOT EXISTS replay_gain (
+        track_id INTEGER PRIMARY KEY,
+        track_gain REAL,   -- The dB value (e.g., -7.5)
+        track_peak REAL,   -- The peak amplitude (useful for preventing clipping)
+        FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    )",
+    [],
+)?;
+
     Ok(())
 }
 

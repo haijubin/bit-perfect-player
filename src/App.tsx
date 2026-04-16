@@ -12,6 +12,7 @@ interface Track {
   year: number;
   duration: number;
   cover_url: string;
+  replay_gain: number | null; // Updated
   genre?: string;
 }
 
@@ -34,13 +35,11 @@ function App() {
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
 
-  // --- UPDATED LIFECYCLE: Load and Auto-Scan ---
   useEffect(() => {
     const initApp = async () => {
       await loadLibrary();
       const paths = await loadPaths(); 
       
-      // Auto-scan existing paths on startup if they exist
       if (paths && paths.length > 0) {
         setStatus("Syncing library...");
         for (const path of paths) {
@@ -61,7 +60,6 @@ function App() {
     return () => { unlisten.then((f) => f()); };
   }, []);
 
-  // Reset sub-selections when changing main sidebar view (except when jumping from Artist -> Album)
   useEffect(() => {
     if (view !== "Albums" && view !== "Artists") {
       setSelectedAlbum(null);
@@ -80,7 +78,7 @@ function App() {
     try {
       const paths = await invoke<string[]>("get_library_paths");
       setLibraryPaths(paths || []);
-      return paths; // Return for the useEffect auto-scan
+      return paths;
     } catch (err) {
       console.error("Could not load library paths:", err);
       return [];
@@ -125,7 +123,10 @@ function App() {
   const playTrack = async (track: Track) => {
     setCurrentTrack(track);
     setIsPlaying(true);
-    await invoke("start_bit_perfect_stream", { filePath: track.file_path });
+    await invoke("start_bit_perfect_stream", { 
+      filePath: track.file_path,
+      replayGain: track.replay_gain 
+    });
   };
 
   const togglePlayback = async () => {
@@ -267,17 +268,17 @@ function App() {
               <div style={{ maxWidth: '1000px' }}>
                 <button onClick={() => setSelectedAlbum(null)} style={{ background: '#222', border: 'none', borderRadius: '50%', width: '40px', height: '40px', color: '#fff', cursor: 'pointer', marginBottom: '30px' }}>〈</button>
                 <div style={{ display: 'flex', gap: '40px', marginBottom: '50px' }}>
-                   <img src={convertFileSrc(albumGrid.find(a => a.album === selectedAlbum)?.cover_url || "")} style={{ width: '280px', height: '280px', borderRadius: '12px' }} />
-                   <div>
-                     <span style={{ color: '#1db954', fontSize: '0.8rem', fontWeight: 800 }}>ALBUM</span>
-                     <h1 style={{ fontSize: '3.5rem', margin: '10px 0' }}>{selectedAlbum}</h1>
-                     <p style={{ fontSize: '1.2rem', opacity: 0.6 }}>{albumGrid.find(a => a.album === selectedAlbum)?.artist}</p>
-                     <div style={{ marginTop: '20px', display: 'flex', gap: '15px', fontSize: '0.8rem', opacity: 0.4 }}>
+                    <img src={convertFileSrc(albumGrid.find(a => a.album === selectedAlbum)?.cover_url || "")} style={{ width: '280px', height: '280px', borderRadius: '12px' }} />
+                    <div>
+                      <span style={{ color: '#1db954', fontSize: '0.8rem', fontWeight: 800 }}>ALBUM</span>
+                      <h1 style={{ fontSize: '3.5rem', margin: '10px 0' }}>{selectedAlbum}</h1>
+                      <p style={{ fontSize: '1.2rem', opacity: 0.6 }}>{albumGrid.find(a => a.album === selectedAlbum)?.artist}</p>
+                      <div style={{ marginTop: '20px', display: 'flex', gap: '15px', fontSize: '0.8rem', opacity: 0.4 }}>
                         <span style={{ border: '1px solid #fff', padding: '2px 8px', borderRadius: '4px' }}>Hi-Res</span>
                         <span>{albumGrid.find(a => a.album === selectedAlbum)?.tracks.length} tracks</span>
                         <span>{albumGrid.find(a => a.album === selectedAlbum)?.year}</span>
-                     </div>
-                   </div>
+                      </div>
+                    </div>
                 </div>
                 <div style={{ borderTop: '1px solid #222' }}>
                   {library.filter(t => t.album === selectedAlbum).map((track, idx) => (
@@ -374,43 +375,73 @@ function App() {
         {/* PLAYBAR */}
         <footer style={{ height: '95px', backgroundColor: '#050505', borderTop: '1px solid #111', display: 'flex', alignItems: 'center', padding: '0 25px', justifyContent: 'space-between', zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '300px' }}>
-             <div style={{ width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden' }}>
-               {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%' }} />}
-             </div>
-             <div>
-               <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{currentTrack?.title || "Maestro"}</div>
-               <div style={{ fontSize: '0.8rem', opacity: 0.5 }}>{currentTrack?.artist || "Ready"}</div>
-             </div>
+              <div style={{ width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden' }}>
+                {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%' }} />}
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{currentTrack?.title || "Maestro"}</div>
+                <div style={{ fontSize: '0.8rem', opacity: 0.5 }}>{currentTrack?.artist || "Ready"}</div>
+              </div>
           </div>
 
           <div style={{ flex: 1, maxWidth: '650px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '30px', marginBottom: '8px' }}>
-               <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏮</button>
-               <button onClick={togglePlayback} style={{ background: '#fff', border: 'none', width: '40px', height: '40px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                 <span style={{ color: '#000', fontSize: '1.2rem' }}>{isPlaying ? "Ⅱ" : "▶"}</span>
-               </button>
-               <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏭</button>
-               <button style={{ background: 'none', border: 'none', color: '#fff', opacity: 0.4, cursor: 'pointer' }}>≡</button>
+                <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏮</button>
+                <button onClick={togglePlayback} style={{ background: '#fff', border: 'none', width: '40px', height: '40px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ color: '#000', fontSize: '1.2rem' }}>{isPlaying ? "Ⅱ" : "▶"}</span>
+                </button>
+                <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏭</button>
+                
+                {/* REPLAY GAIN INDICATOR */}
+                <div 
+                  title={currentTrack?.replay_gain ? `ReplayGain: ${currentTrack.replay_gain} dB` : "No ReplayGain tags found"}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: currentTrack?.replay_gain ? 'rgba(29, 185, 84, 0.1)' : 'transparent',
+                    border: `1px solid ${currentTrack?.replay_gain ? '#1db954' : '#333'}`,
+                    transition: 'all 0.4s ease',
+                    opacity: currentTrack?.replay_gain ? 1 : 0.3,
+                  }}
+                >
+                  <div style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: currentTrack?.replay_gain ? '#1db954' : '#666',
+                    boxShadow: currentTrack?.replay_gain ? '0 0 10px #1db954' : 'none',
+                  }} />
+                  <span style={{ 
+                    fontSize: '10px', 
+                    fontWeight: 900, 
+                    color: currentTrack?.replay_gain ? '#1db954' : '#666' 
+                  }}>
+                    RG
+                  </span>
+                </div>
             </div>
             <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '15px' }}>
-               <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px', textAlign: 'right' }}>{formatTime(progress)}</span>
-               <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', position: 'relative' }}>
-                  <div style={{ width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, height: '100%', backgroundColor: '#fff', borderRadius: '2px' }} />
-               </div>
-               <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>-{formatTime((currentTrack?.duration || 0) - progress)}</span>
+                <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px', textAlign: 'right' }}>{formatTime(progress)}</span>
+                <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', position: 'relative' }}>
+                   <div style={{ width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, height: '100%', backgroundColor: '#fff', borderRadius: '2px' }} />
+                </div>
+                <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>-{formatTime((currentTrack?.duration || 0) - progress)}</span>
             </div>
           </div>
 
           <div style={{ width: '300px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
-             <div style={{ width: '35px', height: '35px', background: '#111', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎩</div>
-             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '1.1rem' }}>🔊</span>
-                <span style={{ fontWeight: 700 }}>50</span>
-             </div>
-             <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.6rem', opacity: 0.4, letterSpacing: '1px' }}>SYSTEM OUTPUT</div>
-                <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>This Computer</div>
-             </div>
+              <div style={{ width: '35px', height: '35px', background: '#111', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎩</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                 <span style={{ fontSize: '1.1rem' }}>🔊</span>
+                 <span style={{ fontWeight: 700 }}>50</span>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                 <div style={{ fontSize: '0.6rem', opacity: 0.4, letterSpacing: '1px' }}>SYSTEM OUTPUT</div>
+                 <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>This Computer</div>
+              </div>
           </div>
         </footer>
       </main>

@@ -18,10 +18,12 @@ pub struct Track {
     pub duration: f64,
     pub file_path: String,
     pub cover_url: Option<String>,
+    pub replay_gain: Option<f32>,
 }
 
 pub fn init_db() -> Connection {
     let conn = Connection::open("library.db").expect("Failed to open database");
+    
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tracks (
             id INTEGER PRIMARY KEY,
@@ -34,16 +36,32 @@ pub fn init_db() -> Connection {
             cover_url TEXT
         )",
         [],
-    ).expect("Failed to create table");
+    ).expect("Failed to create tracks table");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS replay_gain (
+            track_id INTEGER PRIMARY KEY,
+            track_gain REAL,
+            FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        )",
+        [],
+    ).expect("Failed to create replay_gain table");
+
     conn
 }
 
 #[tauri::command]
 pub fn get_library() -> Result<Vec<Track>, String> {
     let conn = Connection::open("library.db").map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, title, artist, album, year, duration, file_path, cover_url FROM tracks")
-        .map_err(|e| e.to_string())?;
     
+    let mut stmt = conn.prepare("
+        SELECT 
+            t.id, t.title, t.artist, t.album, t.year, 
+            t.duration, t.file_path, t.cover_url, rg.track_gain 
+        FROM tracks t
+        LEFT JOIN replay_gain rg ON t.id = rg.track_id
+    ").map_err(|e| e.to_string())?;
+   
     let tracks = stmt.query_map([], |row| {
         Ok(Track {
             id: row.get(0)?,
@@ -54,6 +72,7 @@ pub fn get_library() -> Result<Vec<Track>, String> {
             duration: row.get(5)?,
             file_path: row.get(6)?,
             cover_url: row.get(7)?,
+            replay_gain: row.get(8)?, 
         })
     }).map_err(|e| e.to_string())?
     .filter_map(|t| t.ok())
@@ -66,13 +85,14 @@ pub fn get_library() -> Result<Vec<Track>, String> {
 pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Vec<Track>, String> {
     let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
 
-    // SAVE THE PATH TO DB SO IT PERSISTS ON RESTART
     let _ = conn.execute(
         "INSERT OR IGNORE INTO library_paths (path) VALUES (?1)",
         [&folder_path],
     );
     let scope = app.fs_scope();
     let _ = scope.allow_directory(&folder_path, true);
+    
+    // Re-init to ensure tables exist
     let conn = init_db();
 
     for entry in WalkDir::new(&folder_path)
@@ -90,15 +110,13 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
         let mut year = None;
         let mut duration = 0.0;
         let mut cover_url = None;
+        let mut track_gain: Option<f32> = None;
 
         if let Ok(src) = File::open(entry.path()) {
             let mss = MediaSourceStream::new(Box::new(src), Default::default());
             let hint = Hint::new();
             
-            // ADDED 'mut' HERE (Fixes E0596)
             if let Ok(mut probed) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
-                
-                // Get duration
                 if let Some(stream) = probed.format.tracks().iter().next() {
                     if let Some(params) = &stream.codec_params.time_base {
                         let n_frames = stream.codec_params.n_frames.unwrap_or(0);
@@ -106,7 +124,6 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
                     }
                 }
 
-                // Get metadata (Now works because 'probed' is mutable)
                 if let Some(metadata) = probed.format.metadata().current() {
                     for tag in metadata.tags() {
                         match tag.std_key {
@@ -115,8 +132,17 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
                             Some(StandardTagKey::Album) => album = tag.value.to_string(),
                             Some(StandardTagKey::Date) => {
                                 if let Ok(y) = tag.value.to_string().parse::<i32>() { year = Some(y); }
+                            },
+                            _ => {
+                                // Checking for ReplayGain in the raw keys
+                                let key_string = tag.key.to_uppercase();
+                                if key_string.contains("REPLAYGAIN_TRACK_GAIN") {
+                                    let val_str = tag.value.to_string().replace(" dB", "");
+                                    if let Ok(val) = val_str.parse::<f32>() {
+                                        track_gain = Some(val);
+                                    }
+                                }
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -133,11 +159,21 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             }
         }
 
+        // Insert track info
         let _ = conn.execute(
             "INSERT OR REPLACE INTO tracks (title, artist, album, year, duration, file_path, cover_url) 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![title, artist, album, year, duration, path_str, cover_url],
         );
+
+        // Get track ID and insert gain if found
+        let track_id: i32 = conn.last_insert_rowid() as i32;
+        if let Some(gain) = track_gain {
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO replay_gain (track_id, track_gain) VALUES (?1, ?2)",
+                params![track_id, gain],
+            );
+        }
     }
 
     get_library()
@@ -146,15 +182,12 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
 #[tauri::command]
 pub fn remove_music_path(folder_path: String) -> Result<(), String> {
     let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
-
-    // 1. Remove the tracks that start with this path
-    conn.execute(
+    let _ = conn.execute(
         "DELETE FROM tracks WHERE file_path LIKE ?1 || '%'",
         [&folder_path],
     ).map_err(|e| e.to_string())?;
 
-    // 2. CRITICAL: Remove the path itself from the configuration table
-    conn.execute(
+    let _ = conn.execute(
         "DELETE FROM library_paths WHERE path = ?1",
         [&folder_path],
     ).map_err(|e| e.to_string())?;
