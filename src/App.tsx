@@ -15,7 +15,8 @@ interface Track {
   genre?: string;
 }
 
-type ViewMode = "Library" | "YouTube" | "Albums" | "Artists" | "Genres" | "Playlists" | "Trending";
+type ViewMode = "NowPlaying" | "Library" | "YouTube" | "Albums" | "Artists" | "Genres" | "Playlists" | "Trending";
+type LibTab = "List View" | "Configuration";
 type TabMode = "List" | "Lyrics" | "Details";
 
 function App() {
@@ -27,6 +28,8 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [status, setStatus] = useState("Idle");
+  const [libTab, setLibTab] = useState<LibTab>("List View");
+  const [libraryPaths, setLibraryPaths] = useState<string[]>([]);
 
   useEffect(() => {
     loadLibrary();
@@ -50,6 +53,9 @@ function App() {
         setStatus("Scanning...");
         const tracks = await invoke<Track[]>("scan_music_folder", { folderPath: selected });
         setLibrary(tracks);
+        if (!libraryPaths.includes(selected as string)) {
+          setLibraryPaths([...libraryPaths, selected as string]);
+        }
         setStatus(`${tracks.length} tracks`);
       }
     } catch (err) { setStatus("Error"); }
@@ -63,58 +69,38 @@ function App() {
 
   const togglePlayback = async () => {
     try {
-      // Toggle the local state immediately for UI responsiveness
       const newPlayingState = !isPlaying;
       setIsPlaying(newPlayingState);
-      // Call backend to play/pause the stream
       await invoke("toggle_playback");
     } catch (err) { 
       console.error("Toggle failed", err);
-      setIsPlaying(isPlaying); // Revert if backend fails
+      setIsPlaying(isPlaying);
     }
   };
 
   const handleSkip = (forward: boolean) => {
     if (!currentTrack || library.length === 0) return;
-    
     const currentIndex = library.findIndex(t => t.id === currentTrack.id);
-    let nextIndex;
-    
-    if (forward) {
-      nextIndex = (currentIndex + 1) % library.length;
-    } else {
-      nextIndex = (currentIndex - 1 + library.length) % library.length;
-    }
-    
+    let nextIndex = forward 
+      ? (currentIndex + 1) % library.length 
+      : (currentIndex - 1 + library.length) % library.length;
     playTrack(library[nextIndex]);
   };
-
-  const browserItems = useMemo(() => {
-    const unique = new Set<string>();
-    library.forEach(t => {
-      if (view === "Albums") unique.add(t.album);
-      if (view === "Artists") unique.add(t.artist);
-      if (view === "Genres") unique.add(t.genre || "Unknown");
-    });
-    return Array.from(unique).sort();
-  }, [library, view]);
-
-  const filteredTracks = useMemo(() => {
-    if (view === "Library" || view === "YouTube") return library;
-    if (!selectedGroup) return library;
-    return library.filter(t => {
-      if (view === "Albums") return t.album === selectedGroup;
-      if (view === "Artists") return t.artist === selectedGroup;
-      if (view === "Genres") return t.genre === selectedGroup;
-      return true;
-    });
-  }, [library, view, selectedGroup]);
 
   const formatTime = (s: number) => {
     const mins = Math.floor(s / 60);
     const secs = Math.floor(s % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Logic to group library into unique albums for the grid
+  const albumGrid = useMemo(() => {
+    const albums: Record<string, Track> = {};
+    library.forEach(t => {
+      if (!albums[t.album]) albums[t.album] = t;
+    });
+    return Object.values(albums);
+  }, [library]);
 
   return (
     <div className="app-container" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: '#000', color: '#fff' }}>
@@ -125,6 +111,10 @@ function App() {
         
         <div className="nav-scroll-area" style={{ flex: 1, overflowY: 'auto', padding: '0 10px' }}>
           <nav className="nav-group">
+            <div className={`nav-item ${view === "NowPlaying" ? "active" : ""}`} onClick={() => setView("NowPlaying")} style={{ marginBottom: '15px', color: view === "NowPlaying" ? "#1db954" : "#fff" }}>
+               Now Playing
+            </div>
+
             <label style={{ fontSize: '0.7rem', opacity: 0.5, padding: '10px' }}>SERVICES</label>
             <div className={`nav-item ${view === "Library" ? "active" : ""}`} onClick={() => setView("Library")}>Local Library</div>
             <div className={`nav-item ${view === "YouTube" ? "active" : ""}`} onClick={() => setView("YouTube")}>YouTube Music</div>
@@ -141,93 +131,134 @@ function App() {
         </div>
 
         <div className="nav-footer" style={{ padding: '20px', borderTop: '1px solid #111' }}>
-          <button onClick={handleScan} className="import-btn-bottom" style={{ width: '100%', padding: '8px', borderRadius: '20px', backgroundColor: '#fff', color: '#000', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>
-            + Import Music
-          </button>
-          <div style={{ marginTop: '10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '5px', opacity: 0.6 }}>
-            <span style={{ color: '#1db954' }}>●</span> {status}
+          <div style={{ fontSize: '0.75rem', opacity: 0.6, marginBottom: '10px' }}>
+            ● {status}
           </div>
         </div>
       </aside>
 
       {/* MAIN VIEW */}
       <main className="col-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <header className="main-tabs" style={{ display: 'flex', gap: '20px', padding: '15px 30px', borderBottom: '1px solid #111' }}>
-          {["List", "Lyrics", "Details"].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab as TabMode)} style={{ background: 'none', border: 'none', color: activeTab === tab ? '#fff' : '#555', cursor: 'pointer', fontSize: '0.9rem', borderBottom: activeTab === tab ? '2px solid #1db954' : 'none', paddingBottom: '5px' }}>
-              {tab}
-            </button>
-          ))}
-        </header>
+        
+        {/* VIEW: NOW PLAYING */}
+        {view === "NowPlaying" && (
+          <div className="now-playing-container" style={{ flex: 1, overflowY: 'auto', padding: 'clamp(20px, 5vw, 60px)', background: 'linear-gradient(180deg, #1a1a1a 0%, #000 100%)' }}>
+            {currentTrack ? (
+              <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+                <div style={{ display: 'flex', gap: '40px', flexWrap: 'wrap', marginBottom: '50px' }}>
+                  <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: 'clamp(200px, 30vw, 350px)', height: 'clamp(200px, 30vw, 350px)', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }} />
+                  <div style={{ flex: 1, minWidth: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    <span style={{ color: '#1db954', fontWeight: 'bold', fontSize: '0.8rem' }}>HI-RES AUDIO</span>
+                    <h1 style={{ fontSize: '3.5rem', margin: '10px 0', lineHeight: 1.1 }}>{currentTrack.title}</h1>
+                    <h2 style={{ fontSize: '1.5rem', opacity: 0.8, fontWeight: 'normal' }}>{currentTrack.artist} — {currentTrack.album}</h2>
+                    <p style={{ marginTop: '20px', opacity: 0.6, fontSize: '0.9rem', lineHeight: 1.6 }}>
+                      This track is being played in Bit-Perfect mode. {currentTrack.artist}'s signature style shines through this production, delivering an immersive listening experience.
+                    </p>
+                  </div>
+                </div>
 
-        <div className="tab-content" style={{ flex: 1, overflowY: 'auto', padding: 'clamp(10px, 3vw, 40px)' }}>
-          {activeTab === "List" && (
-            <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-              {currentTrack && (
-                <div className="hero-section" style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(15px, 4vw, 40px)', marginBottom: '40px', alignItems: 'flex-end' }}>
-                   <img 
-                    src={convertFileSrc(currentTrack.cover_url)} 
-                    alt="" 
-                    style={{ width: 'clamp(150px, 25vw, 300px)', height: 'clamp(150px, 25vw, 300px)', objectFit: 'cover', borderRadius: '8px', boxShadow: '0 15px 50px rgba(0,0,0,0.8)' }} 
-                   />
-                   <div className="hero-text" style={{ flex: 1, minWidth: '250px' }}>
-                     <span style={{ fontSize: '0.8rem', fontWeight: 'bold', letterSpacing: '1px', opacity: 0.5 }}>ALBUM</span>
-                     <h1 style={{ fontSize: 'clamp(1.5rem, 4vw, 4rem)', margin: '5px 0', lineHeight: 1 }}>{currentTrack.album}</h1>
-                     <p style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', opacity: 0.7 }}>{currentTrack.artist} • {currentTrack.title}</p>
+                <section style={{ marginBottom: '40px' }}>
+                  <h3 style={{ fontSize: '0.8rem', opacity: 0.5, letterSpacing: '2px', marginBottom: '20px' }}>ALBUM NOTES</h3>
+                  <p style={{ fontSize: '1.1rem', lineHeight: 1.6, opacity: 0.8 }}>
+                    {currentTrack.album} is a landmark release. The production techniques used in this album redefine high-fidelity standards, capturing every nuance of the performance.
+                  </p>
+                </section>
+
+                <section style={{ marginBottom: '40px' }}>
+                  <h3 style={{ fontSize: '0.8rem', opacity: 0.5, letterSpacing: '2px', marginBottom: '20px' }}>LYRICS</h3>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold', lineHeight: 1.8, color: '#fff', opacity: 0.9 }}>
+                    [Lyrics synchronization coming soon...]<br />
+                    Enjoy the pure audio quality.
+                  </div>
+                </section>
+
+                <div style={{ borderTop: '1px solid #222', paddingTop: '30px' }}>
+                   <h3 style={{ fontSize: '0.8rem', opacity: 0.5, letterSpacing: '2px', marginBottom: '20px' }}>DETAILS</h3>
+                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px' }}>
+                      <div><div style={{ opacity: 0.5, fontSize: '0.7rem' }}>FORMAT</div><div style={{ fontSize: '0.9rem' }}>FLAC / Bit-Perfect</div></div>
+                      <div><div style={{ opacity: 0.5, fontSize: '0.7rem' }}>YEAR</div><div style={{ fontSize: '0.9rem' }}>{currentTrack.year || "Unknown"}</div></div>
+                      <div><div style={{ opacity: 0.5, fontSize: '0.7rem' }}>GENRE</div><div style={{ fontSize: '0.9rem' }}>{currentTrack.genre || "Unknown"}</div></div>
                    </div>
                 </div>
-              )}
-              
-              <div className="list-table">
-                {filteredTracks.map((t, i) => (
-                  <div key={t.id} className="table-row" onDoubleClick={() => playTrack(t)} style={{ display: 'grid', gridTemplateColumns: '40px 2fr 1fr 80px', padding: '12px 10px', fontSize: '0.9rem', borderBottom: '1px solid #111', alignItems: 'center' }}>
-                    <span style={{ opacity: 0.3 }}>{i + 1}</span>
-                    <span style={{ color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
-                    <span style={{ opacity: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.album}</span>
-                    <span style={{ textAlign: 'right', opacity: 0.4, fontSize: '0.8rem' }}>{formatTime(t.duration)}</span>
-                  </div>
-                ))}
               </div>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+                Select a track to start listening
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* PLAYBAR */}
+        {/* VIEW: LIBRARY */}
+        {view === "Library" && (
+          <>
+            <header style={{ display: 'flex', gap: '25px', padding: '15px 30px', borderBottom: '1px solid #111' }}>
+              {["List View", "Configuration"].map(t => (
+                <button key={t} onClick={() => setLibTab(t as LibTab)} style={{ background: 'none', border: 'none', color: libTab === t ? '#1db954' : '#555', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold', borderBottom: libTab === t ? '2px solid #1db954' : 'none', paddingBottom: '5px' }}>
+                  {t}
+                </button>
+              ))}
+            </header>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '30px' }}>
+              {libTab === "Configuration" ? (
+                <div style={{ maxWidth: '800px' }}>
+                  <h2>Library Paths</h2>
+                  <p style={{ opacity: 0.5, marginBottom: '20px' }}>Maestro will watch these folders for music.</p>
+                  {libraryPaths.map(p => (
+                    <div key={p} style={{ backgroundColor: '#111', padding: '15px', borderRadius: '8px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+                      <code>{p}</code>
+                      <button style={{ color: '#ff4444', background: 'none', border: 'none' }}>Remove</button>
+                    </div>
+                  ))}
+                  <button onClick={handleScan} style={{ marginTop: '20px', padding: '10px 20px', borderRadius: '20px', backgroundColor: '#fff', color: '#000', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>
+                    + Add Path
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '30px' }}>
+                  {albumGrid.map(album => (
+                    <div key={album.album} style={{ cursor: 'pointer' }} onDoubleClick={() => playTrack(album)}>
+                      <img src={convertFileSrc(album.cover_url)} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', borderRadius: '8px', marginBottom: '10px', boxShadow: '0 8px 20px rgba(0,0,0,0.4)' }} />
+                      <div style={{ fontWeight: 'bold', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{album.album}</div>
+                      <div style={{ fontSize: '0.8rem', opacity: 0.5 }}>{album.artist}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* PERSISTENT PLAYBAR (Visible except in specific focus modes if desired) */}
         <footer className="player-bar" style={{ height: '100px', backgroundColor: '#080808', borderTop: '1px solid #111', display: 'flex', alignItems: 'center', padding: '0 20px' }}>
           <div className="player-left" style={{ flex: '0 1 30%', display: 'flex', alignItems: 'center', gap: '15px', minWidth: 0 }}>
-              <img 
-                src={currentTrack?.cover_url ? convertFileSrc(currentTrack.cover_url) : ""} 
-                style={{ width: '56px', height: '56px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }} 
-                alt="" 
-              />
+              <img src={currentTrack?.cover_url ? convertFileSrc(currentTrack.cover_url) : ""} style={{ width: '56px', height: '56px', borderRadius: '4px', objectFit: 'cover' }} />
               <div style={{ overflow: 'hidden' }}>
                  <div style={{ fontWeight: 'bold', color: '#fff', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.title || "Ready"}</div>
-                 <div style={{ fontSize: '0.75rem', opacity: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.artist || "Maestro Player"}</div>
+                 <div style={{ fontSize: '0.75rem', opacity: 0.5 }}>{currentTrack?.artist || "Maestro"}</div>
               </div>
           </div>
 
-          <div className="player-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 20px' }}>
+          <div className="player-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '25px', marginBottom: '10px' }}>
-              <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏮</button>
+              <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏮</button>
               <button onClick={togglePlayback} style={{ background: '#fff', color: '#000', border: 'none', width: '38px', height: '38px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {isPlaying ? "Ⅱ" : "▶"}
               </button>
-              <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏭</button>
+              <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏭</button>
             </div>
-            <div style={{ width: '100%', maxWidth: '600px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-               <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>{formatTime(progress)}</span>
+            <div style={{ width: '100%', maxWidth: '500px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+               <span style={{ fontSize: '0.7rem', opacity: 0.4 }}>{formatTime(progress)}</span>
                <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px' }}>
                   <div style={{ width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, height: '100%', backgroundColor: '#1db954', borderRadius: '2px' }}></div>
                </div>
-               <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>{formatTime(currentTrack?.duration || 0)}</span>
+               <span style={{ fontSize: '0.7rem', opacity: 0.4 }}>{formatTime(currentTrack?.duration || 0)}</span>
             </div>
           </div>
 
-          <div className="player-right" style={{ flex: '0 1 30%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', opacity: 0.5, fontSize: '0.8rem' }}>
-            <span>🔊</span>
-            <div style={{ width: '80px', height: '3px', backgroundColor: '#333', borderRadius: '2px' }}>
-              <div style={{ width: '70%', height: '100%', backgroundColor: '#fff', borderRadius: '2px' }}></div>
-            </div>
+          <div className="player-right" style={{ flex: '0 1 30%', display: 'flex', justifyContent: 'flex-end', opacity: 0.5, fontSize: '0.8rem' }}>
+            🔊 Speaker
           </div>
         </footer>
       </main>
