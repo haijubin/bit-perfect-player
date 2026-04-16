@@ -56,5 +56,17 @@ found 0 vulnerabilities
 # nvm alias default 22
 # npm run tauri dev
 # npm install tailwindcss @tailwindcss/vite
+--------------------------------------------
+16 April 5:18pm
+# Initialize a repository if you haven't yet
+git init
+
+# Stage all your current progress
+git add .
+
+# Create a "Save Point" (Commit)
+git commit -m "UI Perfect - Adaptive layout and correct anchoring"
+
+
 
 

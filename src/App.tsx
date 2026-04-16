@@ -63,9 +63,30 @@ function App() {
 
   const togglePlayback = async () => {
     try {
+      // Toggle the local state immediately for UI responsiveness
+      const newPlayingState = !isPlaying;
+      setIsPlaying(newPlayingState);
+      // Call backend to play/pause the stream
       await invoke("toggle_playback");
-      setIsPlaying(!isPlaying);
-    } catch (err) { console.error("Toggle failed", err); }
+    } catch (err) { 
+      console.error("Toggle failed", err);
+      setIsPlaying(isPlaying); // Revert if backend fails
+    }
+  };
+
+  const handleSkip = (forward: boolean) => {
+    if (!currentTrack || library.length === 0) return;
+    
+    const currentIndex = library.findIndex(t => t.id === currentTrack.id);
+    let nextIndex;
+    
+    if (forward) {
+      nextIndex = (currentIndex + 1) % library.length;
+    } else {
+      nextIndex = (currentIndex - 1 + library.length) % library.length;
+    }
+    
+    playTrack(library[nextIndex]);
   };
 
   const browserItems = useMemo(() => {
@@ -187,11 +208,11 @@ function App() {
 
           <div className="player-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '25px', marginBottom: '10px' }}>
-              <button style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏮</button>
+              <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏮</button>
               <button onClick={togglePlayback} style={{ background: '#fff', color: '#000', border: 'none', width: '38px', height: '38px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {isPlaying ? "Ⅱ" : "▶"}
               </button>
-              <button style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏭</button>
+              <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer', opacity: 0.7 }}>⏭</button>
             </div>
             <div style={{ width: '100%', maxWidth: '600px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>{formatTime(progress)}</span>
