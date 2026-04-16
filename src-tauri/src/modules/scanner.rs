@@ -135,3 +135,20 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
 
     get_library()
 }
+
+#[tauri::command]
+pub async fn remove_music_path(folder_path: String) -> Result<(), String> {
+    // Access the now-exported get_db_connection
+    let conn = crate::modules::database::get_db_connection()
+        .map_err(|e| format!("Database connection error: {}", e))?;
+
+    let pattern = format!("{}%", folder_path);
+
+    conn.execute(
+        "DELETE FROM tracks WHERE file_path LIKE ?",
+        [pattern],
+    ).map_err(|e| format!("Failed to delete tracks: {}", e))?;
+
+    println!("Purged tracks starting with: {}", folder_path);
+    Ok(())
+}
