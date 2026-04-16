@@ -1,12 +1,11 @@
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
-use std::fs;
+// REMOVED: use std::fs; (Not used)
 
-// In Tauri v2, we usually resolve paths relative to the executable 
-// or use a dedicated path plugin. For simplicity and reliability:
+// Helper to get the path to the DB file
 fn get_db_path() -> PathBuf {
-    // This places the DB in the same folder as the app data or current dir
-    let mut path = PathBuf::from("library.db");
+    // REMOVED: mut (The path isn't being modified after creation)
+    let path = PathBuf::from("library.db");
     path
 }
 
@@ -28,7 +27,6 @@ pub fn init_db() -> Result<()> {
     Ok(())
 }
 
-// The core connection helper
 pub fn get_db_connection() -> Result<Connection> {
     let path = get_db_path();
     Connection::open(path)
