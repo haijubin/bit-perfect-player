@@ -13,6 +13,7 @@ use tauri::Emitter;
 pub struct PlayerState {
     pub active_stream: Mutex<Option<cpal::Stream>>,
     pub elapsed_samples: Arc<AtomicU64>,
+    pub is_playing: Arc<Mutex<bool>>,
 }
 
 // Manually defining what "Default" looks like for your state
@@ -21,6 +22,7 @@ impl Default for PlayerState {
         Self {
             active_stream: Mutex::new(None),
             elapsed_samples: Arc::new(AtomicU64::new(0)),
+            is_playing: Arc::new(Mutex::new(false)),
         }
     }
 }
@@ -115,14 +117,20 @@ pub fn start_bit_perfect_stream(
 #[tauri::command]
 pub fn toggle_playback(state: tauri::State<'_, PlayerState>) -> Result<bool, String> {
     let stream_lock = state.active_stream.lock().map_err(|_| "Failed to lock stream")?;
+    let mut playing_lock = state.is_playing.lock().map_err(|_| "Failed to lock status")?;
     
     if let Some(stream) = stream_lock.as_ref() {
-        // We use a simple toggle. Note: In a full app, you'd store 
-        // a 'is_paused' boolean in your PlayerState struct.
-        // For now, we'll force a play signal to ensure it resumes.
-        stream.play().map_err(|e| e.to_string())?;
-        Ok(true) 
+        if *playing_lock {
+            // If currently playing, pause it
+            stream.pause().map_err(|e| e.to_string())?;
+            *playing_lock = false;
+        } else {
+            // If currently paused, play it
+            stream.play().map_err(|e| e.to_string())?;
+            *playing_lock = true;
+        }
+        Ok(*playing_lock)
     } else {
-        Err("No active stream to toggle".into())
+        Err("No active stream found".into())
     }
 }
