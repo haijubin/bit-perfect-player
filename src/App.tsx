@@ -31,14 +31,29 @@ function App() {
   const [status, setStatus] = useState("Idle");
   const [libraryPaths, setLibraryPaths] = useState<string[]>([]);
 
-  // Sub-navigation states for Detail Views
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
 
-  // LIFECYCLE: Load everything on boot
+  // --- UPDATED LIFECYCLE: Load and Auto-Scan ---
   useEffect(() => {
-    loadLibrary();
-    loadPaths(); // <--- CRITICAL: Fetch persisted paths from DB
+    const initApp = async () => {
+      await loadLibrary();
+      const paths = await loadPaths(); 
+      
+      // Auto-scan existing paths on startup if they exist
+      if (paths && paths.length > 0) {
+        setStatus("Syncing library...");
+        for (const path of paths) {
+          try {
+            await invoke("scan_music_folder", { folderPath: path });
+          } catch (e) { console.error("Scan failed for", path, e); }
+        }
+        await loadLibrary();
+        setStatus("Library Synced");
+      }
+    };
+
+    initApp();
     
     const unlisten = listen<number>("progress", (event) => {
       setProgress(event.payload);
@@ -46,10 +61,12 @@ function App() {
     return () => { unlisten.then((f) => f()); };
   }, []);
 
-  // Reset sub-selections when changing main sidebar view
+  // Reset sub-selections when changing main sidebar view (except when jumping from Artist -> Album)
   useEffect(() => {
-    setSelectedAlbum(null);
-    setSelectedArtist(null);
+    if (view !== "Albums" && view !== "Artists") {
+      setSelectedAlbum(null);
+      setSelectedArtist(null);
+    }
   }, [view]);
 
   const loadLibrary = async () => {
@@ -59,13 +76,14 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // NEW: Fetch paths from the Rust backend
   const loadPaths = async () => {
     try {
       const paths = await invoke<string[]>("get_library_paths");
       setLibraryPaths(paths || []);
+      return paths; // Return for the useEffect auto-scan
     } catch (err) {
       console.error("Could not load library paths:", err);
+      return [];
     }
   };
 
@@ -84,7 +102,7 @@ function App() {
       if (selected && !libraryPaths.includes(selected as string)) {
         setStatus("Scanning new path...");
         await invoke("scan_music_folder", { folderPath: selected as string });
-        await loadPaths(); // <--- Refresh list from DB
+        await loadPaths();
         await loadLibrary();
         setStatus("Library updated");
       }
@@ -95,9 +113,9 @@ function App() {
     setStatus(`Removing ${pathToRemove}...`);
     try {
       await invoke("remove_music_path", { folderPath: pathToRemove });
-      await loadPaths(); // <--- Refresh list from DB
+      await loadPaths();
       await loadLibrary();
-      setStatus("Path removed and library cleaned");
+      setStatus("Path removed");
     } catch (err) {
       console.error(err);
       setStatus("Error removing path");
@@ -132,7 +150,6 @@ function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Data helpers
   const albumGrid = useMemo(() => {
     const albums: Record<string, Track[]> = {};
     library.forEach(t => {
@@ -230,7 +247,7 @@ function App() {
           </div>
         )}
 
-        {/* VIEW: ALBUMS (With Drill-down) */}
+        {/* VIEW: ALBUMS */}
         {view === "Albums" && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '40px' }}>
             {!selectedAlbum ? (
@@ -272,7 +289,7 @@ function App() {
                       </div>
                       <span style={{ fontSize: '0.7rem', border: '1px solid #1db954', color: '#1db954', padding: '1px 6px', borderRadius: '4px', marginRight: '20px' }}>Hi-Res</span>
                       <span style={{ opacity: 0.4, width: '50px' }}>{formatTime(track.duration)}</span>
-                      <button style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem' }}>▶</button>
+                      <button onClick={() => playTrack(track)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem' }}>▶</button>
                     </div>
                   ))}
                 </div>
@@ -281,7 +298,7 @@ function App() {
           </div>
         )}
 
-        {/* VIEW: ARTISTS (With Drill-down) */}
+        {/* VIEW: ARTISTS */}
         {view === "Artists" && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '40px' }}>
             {!selectedArtist ? (
@@ -316,7 +333,7 @@ function App() {
           </div>
         )}
 
-        {/* VIEW: LIBRARY (Standard List/Config) */}
+        {/* VIEW: LIBRARY */}
         {view === "Library" && (
           <>
             <header style={{ display: 'flex', gap: '30px', padding: '20px 40px', borderBottom: '1px solid #111' }}>
@@ -342,7 +359,7 @@ function App() {
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '35px' }}>
                   {albumGrid.map(a => (
-                    <div key={a.album} onDoubleClick={() => playTrack(a.tracks[0])} style={{ cursor: 'pointer' }}>
+                    <div key={a.album} onDoubleClick={() => playTrack(a.tracks[0])} onClick={() => { setSelectedAlbum(a.album); setView("Albums"); }} style={{ cursor: 'pointer' }}>
                       <img src={convertFileSrc(a.cover_url)} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', borderRadius: '10px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }} />
                       <div style={{ fontWeight: 'bold', marginTop: '12px' }}>{a.album}</div>
                       <div style={{ opacity: 0.5, fontSize: '0.85rem' }}>{a.artist}</div>
@@ -354,9 +371,8 @@ function App() {
           </>
         )}
 
-        {/* REDESIGNED PLAYBAR */}
+        {/* PLAYBAR */}
         <footer style={{ height: '95px', backgroundColor: '#050505', borderTop: '1px solid #111', display: 'flex', alignItems: 'center', padding: '0 25px', justifyContent: 'space-between', zIndex: 10 }}>
-          {/* Left: Metadata */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '300px' }}>
              <div style={{ width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden' }}>
                {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%' }} />}
@@ -367,7 +383,6 @@ function App() {
              </div>
           </div>
 
-          {/* Center: Controls */}
           <div style={{ flex: 1, maxWidth: '650px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '30px', marginBottom: '8px' }}>
                <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏮</button>
@@ -386,7 +401,6 @@ function App() {
             </div>
           </div>
 
-          {/* Right: Audio Info / Volume */}
           <div style={{ width: '300px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
              <div style={{ width: '35px', height: '35px', background: '#111', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎩</div>
              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
