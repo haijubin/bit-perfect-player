@@ -1,4 +1,10 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import playIcon from "../assets/icons/audio/play.svg";
+import pauseIcon from "../assets/icons/audio/pause.svg";
+import skipFwdIcon from "../assets/icons/audio/skip_fwd.svg";
+import skipRevIcon from "../assets/icons/audio/skip_rev.svg";
+import highResIcon from "../assets/icons/audio/High_Res_Audio.svg";
+import outputIcon from "../assets/icons/audio/output.svg";
 
 interface Track {
   id: number;
@@ -14,8 +20,6 @@ interface PlayerBarProps {
   currentTrack: Track | null;
   isPlaying: boolean;
   progress: number;
-  rgEnabled: boolean;
-  toggleRg: () => void;
   togglePlayback: () => void;
   handleSkip: (forward: boolean) => void;
   formatTime: (s: number) => string;
@@ -25,92 +29,90 @@ export default function PlayerBar({
   currentTrack,
   isPlaying,
   progress,
-  rgEnabled,
-  toggleRg,
   togglePlayback,
   handleSkip,
   formatTime
 }: PlayerBarProps) {
-  const hasMetadata = currentTrack?.replay_gain !== null;
-  const isActive = rgEnabled && hasMetadata;
+  
+  // Logic to determine if we should show the High Res icon
+  // For now, we'll check if it's a FLAC or WAV file
+  const isHiRes = currentTrack?.file_path.toLowerCase().endsWith('.flac') || 
+                  currentTrack?.file_path.toLowerCase().endsWith('.wav');
+
+  const iconStyle = { width: '20px', height: '20px', filter: 'invert(1)' };
 
   return (
     <footer style={{ 
-      height: '95px', 
-      backgroundColor: '#050505', 
-      borderTop: '1px solid #111', 
-      display: 'flex', 
-      alignItems: 'center', 
-      padding: '0 25px', 
-      justifyContent: 'space-between', 
-      zIndex: 10 
+      height: '95px', backgroundColor: '#050505', borderTop: '1px solid #111', 
+      display: 'flex', alignItems: 'center', padding: '0 25px', justifyContent: 'space-between', zIndex: 10 
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '300px' }}>
+      {/* Track Info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '350px' }}>
         <div style={{ width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden' }}>
-          {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%' }} />}
+          {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="cover" />}
         </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{currentTrack?.title || "Maestro"}</div>
-          <div style={{ fontSize: '0.8rem', opacity: 0.5 }}>{currentTrack?.artist || "Ready"}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+              {currentTrack?.title || "No Track Selected"}
+            </span>
+            {isHiRes && <img src={highResIcon} style={{ height: '14px' }} alt="Hi-Res" />}
+          </div>
+          <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>{currentTrack?.artist || "Unknown Artist"}</span>
         </div>
       </div>
 
-      <div style={{ flex: 1, maxWidth: '650px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '30px', marginBottom: '8px' }}>
-          <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏮</button>
-          <button onClick={togglePlayback} style={{ 
-            background: '#fff', border: 'none', width: '40px', height: '40px', borderRadius: '50%', 
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' 
-          }}>
-            <span style={{ color: '#000', fontSize: '1.2rem' }}>{isPlaying ? "Ⅱ" : "▶"}</span>
+      {/* Main Controls */}
+      <div style={{ flex: 1, maxWidth: '600px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '25px' }}>
+          <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+            <img src={skipRevIcon} style={iconStyle} alt="Previous" />
           </button>
-          <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}>⏭</button>
           
-          {/* Replay Gain Interactive Switch */}
           <button 
-            onClick={hasMetadata ? toggleRg : undefined}
-            title={hasMetadata ? `RG: ${currentTrack?.replay_gain} dB` : "No RG metadata"}
-            style={{
-              background: 'none',
-              cursor: hasMetadata ? 'pointer' : 'not-allowed',
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '4px',
-              border: `1px solid ${isActive ? '#1db954' : '#333'}`,
-              transition: 'all 0.3s ease',
-              opacity: hasMetadata ? 1 : 0.2,
+            onClick={togglePlayback} 
+            style={{ 
+              width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#fff', 
+              display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' 
             }}
           >
-            <div style={{
-              width: '6px', height: '6px', borderRadius: '50%',
-              backgroundColor: isActive ? '#1db954' : '#666',
-              boxShadow: isActive ? '0 0 10px #1db954' : 'none',
-            }} />
-            <span style={{ fontSize: '10px', fontWeight: 900, color: isActive ? '#1db954' : '#666' }}>
-              RG {isActive ? 'ON' : 'OFF'}
-            </span>
+            <img 
+              src={isPlaying ? pauseIcon : playIcon} 
+              style={{ width: '18px', height: '18px', filter: 'none' }} // No invert here as background is white
+              alt="Play/Pause" 
+            />
+          </button>
+
+          <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+            <img src={skipFwdIcon} style={iconStyle} alt="Next" />
           </button>
         </div>
 
+        {/* Progress Bar */}
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px', textAlign: 'right' }}>{formatTime(progress)}</span>
-          <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', position: 'relative' }}>
+          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px', textAlign: 'right' }}>{formatTime(progress)}</span>
+          <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', position: 'relative', cursor: 'pointer' }}>
             <div style={{ 
               width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, 
-              height: '100%', backgroundColor: '#fff', borderRadius: '2px' 
+              height: '100%', backgroundColor: '#1db954', borderRadius: '2px' 
             }} />
           </div>
-          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '35px' }}>-{formatTime((currentTrack?.duration || 0) - progress)}</span>
+          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px' }}>
+            {currentTrack ? formatTime(currentTrack.duration) : "0:00"}
+          </span>
         </div>
       </div>
 
-      <div style={{ width: '300px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
-        <div style={{ width: '35px', height: '35px', background: '#111', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎩</div>
+      {/* Volume/Device Info */}
+      <div style={{ width: '350px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+           <img src={outputIcon} style={{ width: '22px', height: '22px', filter: 'invert(1)', opacity: 0.7 }} alt="Output" />
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '1.1rem' }}>🔊</span>
-          <span style={{ fontWeight: 700 }}>50</span>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.6rem', opacity: 0.4, letterSpacing: '1px' }}>SYSTEM OUTPUT</div>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>This Computer</div>
+          <span style={{ fontSize: '1rem', opacity: 0.7 }}>🔊</span>
+          <div style={{ width: '80px', height: '4px', backgroundColor: '#222', borderRadius: '2px' }}>
+            <div style={{ width: '70%', height: '100%', backgroundColor: '#fff', borderRadius: '2px' }} />
+          </div>
         </div>
       </div>
     </footer>

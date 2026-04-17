@@ -8,7 +8,10 @@ import YouTube from "./pages/YouTube";
 import { useAudioPlayer, Track } from "./hooks/useAudioPlayer";
 
 export type ViewMode = "NowPlaying" | "Library" | "YouTube" | "Albums" | "Artists" | "Genres" | "Playlists" | "Trending";
-export type LibTab = "List View" | "Tracks" | "Configuration";
+
+// Updated Tab Types to Title Case
+export type LibTab = "Album View" | "List View" | "Paths"; 
+
 export type NowPlayingSubTab = "Lyrics" | "Details";
 
 function App() {
@@ -19,7 +22,7 @@ function App() {
   } = useAudioPlayer();
 
   const [view, setView] = useState<ViewMode>("Library");
-  const [libTab, setLibTab] = useState<LibTab>("List View");
+  const [libTab, setLibTab] = useState<LibTab>("Album View"); // Default updated
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingSubTab>("Lyrics");
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
 

@@ -3,8 +3,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { Track } from "../hooks/useAudioPlayer";
 
 interface LibraryProps {
-  libTab: "List View" | "Tracks" | "Configuration";
-  setLibTab: (tab: "List View" | "Tracks" | "Configuration") => void;
+  libTab: "Album View" | "List View" | "Paths";
+  setLibTab: (tab: "Album View" | "List View" | "Paths") => void;
   albumGrid: any[];
   library: Track[];
   libraryPaths: string[];
@@ -37,11 +37,10 @@ export default function Library({
     });
   }, [library, sortKey, sortOrder]);
 
-  // --- NEW: Keyboard "Select All" Logic ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (libTab === "Tracks" && (e.ctrlKey || e.metaKey) && e.key === "a") {
-        e.preventDefault(); // Stop browser from highlighting text
+      if (libTab === "List View" && (e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
         setSelectedTrackIds(sortedTracks.map(t => t.id));
       }
     };
@@ -60,7 +59,6 @@ export default function Library({
         prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
       );
     } else if (e.shiftKey && selectedTrackIds.length > 0) {
-      // Shift-click range selection
       const lastId = selectedTrackIds[selectedTrackIds.length - 1];
       const lastIndex = sortedTracks.findIndex(t => t.id === lastId);
       const start = Math.min(lastIndex, index);
@@ -72,16 +70,10 @@ export default function Library({
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (selectedTrackIds.length === 0) return;
-    alert(`Menu for ${selectedTrackIds.length} tracks.`);
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#000' }}>
       <header style={{ display: 'flex', gap: '30px', padding: '20px 40px', borderBottom: '1px solid #111', userSelect: 'none' }}>
-        {["List View", "Tracks", "Configuration"].map((t) => (
+        {["Album View", "List View", "Paths"].map((t) => (
           <button
             key={t}
             onClick={() => setLibTab(t as any)}
@@ -90,7 +82,7 @@ export default function Library({
               color: libTab === t ? '#1db954' : '#555',
               cursor: 'pointer', fontWeight: 800,
               borderBottom: libTab === t ? '2px solid #1db954' : 'none',
-              paddingBottom: '10px', fontSize: '0.9rem', textTransform: 'uppercase'
+              paddingBottom: '10px', fontSize: '0.9rem', transition: 'color 0.2s'
             }}
           >
             {t}
@@ -99,15 +91,21 @@ export default function Library({
       </header>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 40px' }}>
-        {libTab === "Configuration" ? (
+        {libTab === "Paths" ? (
           <div style={{ maxWidth: '800px' }}>
-            <h2>Library Configuration</h2>
-            {/* ... keep config logic same ... */}
-            <button onClick={handleRescan}>Rescan</button>
-            {libraryPaths.map(p => <div key={p}>{p}</div>)}
-            <button onClick={handleAddPath}>+ Add Path</button>
+            <h2>Library Paths</h2>
+            <div style={{ marginBottom: '30px' }}>
+              <button onClick={handleRescan} style={{ padding: '8px 16px', borderRadius: '20px', backgroundColor: '#222', color: '#fff', border: 'none', cursor: 'pointer', marginRight: '10px' }}>Rescan Folders</button>
+              <button onClick={handleAddPath} style={{ padding: '8px 16px', borderRadius: '20px', backgroundColor: '#1db954', color: '#000', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>+ Add Path</button>
+            </div>
+            {libraryPaths.map((p) => (
+              <div key={p} style={{ backgroundColor: '#080808', padding: '12px', borderRadius: '8px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <code style={{ fontSize: '0.85rem', opacity: 0.7 }}>{p}</code>
+                <button onClick={() => handleRemovePath(p)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
+              </div>
+            ))}
           </div>
-        ) : libTab === "Tracks" ? (
+        ) : libTab === "List View" ? (
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', userSelect: 'none' }}>
             <thead style={{ position: 'sticky', top: 0, backgroundColor: '#000', zIndex: 1 }}>
               <tr style={{ color: '#555', fontSize: '0.75rem', borderBottom: '1px solid #222', textTransform: 'uppercase' }}>
@@ -122,7 +120,7 @@ export default function Library({
                 </th>
               </tr>
             </thead>
-            <tbody onContextMenu={handleContextMenu}>
+            <tbody>
               {sortedTracks.map((track, index) => (
                 <tr 
                   key={track.id}
@@ -142,10 +140,11 @@ export default function Library({
             </tbody>
           </table>
         ) : (
+          /* Album View (formerly List View/Album Grid) */
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '35px' }}>
             {albumGrid.map((a) => (
               <div key={a.album} onClick={() => { setSelectedAlbum(a.album); setView("Albums"); }} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                <img src={convertFileSrc(a.cover_url)} style={{ width: '100%', borderRadius: '8px' }} />
+                <img src={convertFileSrc(a.cover_url)} style={{ width: '100%', borderRadius: '8px' }} alt={a.album} />
                 <div style={{ fontWeight: 700, fontSize: '0.9rem', marginTop: '10px' }}>{a.album}</div>
                 <div style={{ opacity: 0.5, fontSize: '0.8rem' }}>{a.artist}</div>
               </div>
