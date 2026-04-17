@@ -34,12 +34,22 @@ export default function PlayerBar({
   formatTime
 }: PlayerBarProps) {
   
+  const DEFAULT_ART = "/default.jpg";
+
   // Logic to determine if we should show the High Res icon
-  // For now, we'll check if it's a FLAC or WAV file
   const isHiRes = currentTrack?.file_path.toLowerCase().endsWith('.flac') || 
                   currentTrack?.file_path.toLowerCase().endsWith('.wav');
 
   const iconStyle = { width: '20px', height: '20px', filter: 'invert(1)' };
+
+  // Helper to resolve the artwork path
+  const getArtPath = (path: string | null | undefined) => {
+    if (!path || path === "" || path === "null") return DEFAULT_ART;
+    // If it's our public asset (saved as /default.jpg in DB), return as-is
+    if (path.startsWith("/default")) return path;
+    // Otherwise, convert the local system path
+    return convertFileSrc(path);
+  };
 
   return (
     <footer style={{ 
@@ -48,17 +58,50 @@ export default function PlayerBar({
     }}>
       {/* Track Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '350px' }}>
-        <div style={{ width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden' }}>
-          {currentTrack && <img src={convertFileSrc(currentTrack.cover_url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="cover" />}
+        <div style={{ 
+          width: '52px', 
+          height: '52px', 
+          background: '#111', 
+          borderRadius: '6px', 
+          overflow: 'hidden',
+          flexShrink: 0 
+        }}>
+          {currentTrack && (
+            <img 
+              src={getArtPath(currentTrack.cover_url)} 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              alt="cover" 
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.src.endsWith(DEFAULT_ART)) {
+                  target.src = DEFAULT_ART;
+                }
+              }}
+            />
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+            <span style={{ 
+              fontWeight: 700, 
+              fontSize: '0.9rem', 
+              whiteSpace: 'nowrap', 
+              textOverflow: 'ellipsis', 
+              overflow: 'hidden' 
+            }}>
               {currentTrack?.title || "No Track Selected"}
             </span>
-            {isHiRes && <img src={highResIcon} style={{ height: '14px' }} alt="Hi-Res" />}
+            {isHiRes && <img src={highResIcon} style={{ height: '14px', flexShrink: 0 }} alt="Hi-Res" />}
           </div>
-          <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>{currentTrack?.artist || "Unknown Artist"}</span>
+          <span style={{ 
+            fontSize: '0.8rem', 
+            opacity: 0.6, 
+            whiteSpace: 'nowrap', 
+            textOverflow: 'ellipsis', 
+            overflow: 'hidden' 
+          }}>
+            {currentTrack?.artist || "Unknown Artist"}
+          </span>
         </div>
       </div>
 
@@ -78,7 +121,7 @@ export default function PlayerBar({
           >
             <img 
               src={isPlaying ? pauseIcon : playIcon} 
-              style={{ width: '18px', height: '18px', filter: 'none' }} // No invert here as background is white
+              style={{ width: '18px', height: '18px', filter: 'none' }} 
               alt="Play/Pause" 
             />
           </button>

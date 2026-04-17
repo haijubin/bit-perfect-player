@@ -159,6 +159,10 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             }
         }
 
+        if cover_url.is_none() {
+            cover_url = Some("/default.jpg".to_string());
+        }
+
         // Insert track info
         let _ = conn.execute(
             "INSERT OR REPLACE INTO tracks (title, artist, album, year, duration, file_path, cover_url) 

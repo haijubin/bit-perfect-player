@@ -15,6 +15,9 @@ export default function NowPlaying({
   setNowPlayingTab 
 }: NowPlayingProps) {
   
+  // Constant for our default asset
+  const DEFAULT_ART = "/default.jpg";
+
   // Display a placeholder if nothing is playing
   if (!currentTrack) {
     return (
@@ -35,6 +38,15 @@ export default function NowPlaying({
   const isHiRes = currentTrack.file_path.toLowerCase().endsWith('.flac') || 
                   currentTrack.file_path.toLowerCase().endsWith('.wav');
 
+  // Helper to determine image source based on DB value
+  const getArtPath = (path: string | null) => {
+    if (!path || path === "" || path === "null") return DEFAULT_ART;
+    // If it starts with /default, it is our public web asset
+    if (path.startsWith("/default")) return path;
+    // Otherwise it is a system path requiring conversion
+    return convertFileSrc(path);
+  };
+
   return (
     <div style={{ 
       height: '100%', 
@@ -54,12 +66,20 @@ export default function NowPlaying({
           borderRadius: '8px', 
           overflow: 'hidden', 
           boxShadow: '0 20px 60px rgba(0,0,0,1)',
-          flexShrink: 0
+          flexShrink: 0,
+          backgroundColor: '#111' // Dark background while loading
         }}>
           <img 
-            src={convertFileSrc(currentTrack.cover_url)} 
+            key={currentTrack.id} // Forces re-render on track change
+            src={getArtPath(currentTrack.cover_url)} 
             style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
             alt="Album Cover" 
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              if (!target.src.endsWith(DEFAULT_ART)) {
+                target.src = DEFAULT_ART;
+              }
+            }}
           />
         </div>
 
@@ -86,7 +106,6 @@ export default function NowPlaying({
                 style={{ 
                   height: '24px', 
                   marginRight: '8px',
-                  // Brightness and Green Glow effect
                   filter: 'brightness(1.4) drop-shadow(0px 0px 10px rgba(29, 185, 84, 0.7))',
                 }} 
                 alt="Hi-Res Audio" 
@@ -97,7 +116,7 @@ export default function NowPlaying({
             <span>{currentTrack.year || "----"}</span>
             <span>•</span>
             <span style={{ letterSpacing: '1px', fontSize: '0.85rem' }}>
-              FLAC 24-BIT / 96KHZ
+              {isHiRes ? 'FLAC 24-BIT / 96KHZ' : 'MPEG-3 / 320KBPS'}
             </span>
           </div>
         </div>

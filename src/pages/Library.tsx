@@ -27,6 +27,18 @@ export default function Library({
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [selectedTrackIds, setSelectedTrackIds] = useState<number[]>([]);
 
+  // Constant for our default asset
+  const DEFAULT_ART = "/default.jpg";
+
+  // Helper to determine image source based on DB value
+  const getArtPath = (path: string | null) => {
+    if (!path || path === "" || path === "null") return DEFAULT_ART;
+    // If it starts with /default, it is a public web asset
+    if (path.startsWith("/default")) return path;
+    // Otherwise it is a system path requiring conversion
+    return convertFileSrc(path);
+  };
+
   const sortedTracks = useMemo(() => {
     return [...library].sort((a, b) => {
       const valA = (a[sortKey] || "").toString().toLowerCase();
@@ -140,11 +152,18 @@ export default function Library({
             </tbody>
           </table>
         ) : (
-          /* Album View (formerly List View/Album Grid) */
+          /* Album View */
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '35px' }}>
             {albumGrid.map((a) => (
               <div key={a.album} onClick={() => { setSelectedAlbum(a.album); setView("Albums"); }} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                <img src={convertFileSrc(a.cover_url)} style={{ width: '100%', borderRadius: '8px' }} alt={a.album} />
+                <img 
+                  src={getArtPath(a.cover_url)} 
+                  style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', borderRadius: '8px' }} 
+                  alt={a.album} 
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = DEFAULT_ART;
+                  }}
+                />
                 <div style={{ fontWeight: 700, fontSize: '0.9rem', marginTop: '10px' }}>{a.album}</div>
                 <div style={{ opacity: 0.5, fontSize: '0.8rem' }}>{a.artist}</div>
               </div>
