@@ -7,7 +7,6 @@ use crate::modules::decoder::DecodedStream;
 use crate::modules::audio_output::AudioEngine;
 use cpal::traits::StreamTrait;
 
-// --- CRITICAL: THE MISSING STRUCT DEFINITION ---
 pub struct PlayerState {
     pub active_stream: Mutex<Option<cpal::Stream>>,
     pub is_playing: Arc<Mutex<bool>>,
@@ -37,8 +36,11 @@ pub fn start_bit_perfect_stream(
 ) -> Result<String, String> {
     let mut stream_data = DecodedStream::new(&file_path, replay_gain)?;
     let engine = AudioEngine::new()?;
-    let sample_rate = engine.config.sample_rate as f32; 
-    let channels = engine.config.channels as f32;
+
+    // --- CRITICAL FIX: Get File Specs for Math ---
+    // We use these for UI and Seek calculations
+    let file_sample_rate = stream_data.sample_rate as f64;
+    let file_channels = stream_data.channels as f64;
 
     state.elapsed_samples.store(0, Ordering::SeqCst);
     let ring_buffer = rb::SpscRb::<f32>::new(65536);
@@ -60,8 +62,9 @@ pub fn start_bit_perfect_stream(
     let window_clone = window.clone();
     std::thread::spawn(move || {
         loop {
-            let samples = elapsed_clone.load(Ordering::SeqCst) as f32;
-            let seconds = (samples / channels) / sample_rate;
+            let samples = elapsed_clone.load(Ordering::SeqCst) as f64;
+            // Use file_channels and file_sample_rate for accurate UI timing
+            let seconds = (samples / file_channels) / file_sample_rate;
             let _ = window_clone.emit("progress", seconds);
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
@@ -81,7 +84,10 @@ pub fn start_bit_perfect_stream(
                 if let Some(time_s) = *pending {
                     if let Ok(_) = stream_data.seek(time_s) {
                         clear_buffer.store(true, Ordering::SeqCst);
-                        let new_pos = (time_s * sample_rate as f64 * channels as f64) as u64;
+                        
+                        // --- MATH FIX ---
+                        // Calculate new sample position based on FILE specs
+                        let new_pos = (time_s * file_sample_rate * file_channels) as u64;
                         elapsed_samples.store(new_pos, Ordering::SeqCst);
                     }
                     *pending = None;
@@ -108,7 +114,9 @@ pub fn start_bit_perfect_stream(
 
                     let mut i = 0;
                     while i < samples.len() {
+                        // Break if a seek is requested mid-decode
                         if seek_pending.lock().unwrap().is_some() { break; }
+                        
                         let written = producer.write(&samples[i..]).unwrap_or(0);
                         if written == 0 { 
                             std::thread::yield_now();
