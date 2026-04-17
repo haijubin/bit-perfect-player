@@ -1,8 +1,8 @@
 [package]
 name = "bit-perfect-player"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "An Audiophile Music Player"
+authors = ["Jubin George"]
 edition = "2021"
 
 [lib]

@@ -14,6 +14,9 @@ export interface Track {
   cover_url: string;
   replay_gain: number | null;
   genre?: string;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  channels: number | null;
 }
 
 export function useAudioPlayer() {

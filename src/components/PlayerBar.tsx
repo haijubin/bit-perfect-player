@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import playIcon from "../assets/icons/audio/play.svg";
 import pauseIcon from "../assets/icons/audio/pause.svg";
@@ -14,6 +15,8 @@ interface Track {
   cover_url: string;
   duration: number;
   replay_gain: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
 }
 
 interface PlayerBarProps {
@@ -36,18 +39,19 @@ export default function PlayerBar({
   
   const DEFAULT_ART = "/default.jpg";
 
-  // Logic to determine if we should show the High Res icon
-  const isHiRes = currentTrack?.file_path.toLowerCase().endsWith('.flac') || 
-                  currentTrack?.file_path.toLowerCase().endsWith('.wav');
+  // Logic to determine if track is high resolution (Greater than CD quality)
+  const isHiRes = useMemo(() => {
+    if (!currentTrack) return false;
+    const rate = currentTrack.sample_rate || 0;
+    const depth = currentTrack.bit_depth || 0;
+    return depth > 16 || rate > 44100;
+  }, [currentTrack]);
 
   const iconStyle = { width: '20px', height: '20px', filter: 'invert(1)' };
 
-  // Helper to resolve the artwork path
   const getArtPath = (path: string | null | undefined) => {
     if (!path || path === "" || path === "null") return DEFAULT_ART;
-    // If it's our public asset (saved as /default.jpg in DB), return as-is
     if (path.startsWith("/default")) return path;
-    // Otherwise, convert the local system path
     return convertFileSrc(path);
   };
 
@@ -59,12 +63,7 @@ export default function PlayerBar({
       {/* Track Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '350px' }}>
         <div style={{ 
-          width: '52px', 
-          height: '52px', 
-          background: '#111', 
-          borderRadius: '6px', 
-          overflow: 'hidden',
-          flexShrink: 0 
+          width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden', flexShrink: 0 
         }}>
           {currentTrack && (
             <img 
@@ -73,33 +72,33 @@ export default function PlayerBar({
               alt="cover" 
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                if (!target.src.endsWith(DEFAULT_ART)) {
-                  target.src = DEFAULT_ART;
-                }
+                if (!target.src.endsWith(DEFAULT_ART)) target.src = DEFAULT_ART;
               }}
             />
           )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-            <span style={{ 
-              fontWeight: 700, 
-              fontSize: '0.9rem', 
-              whiteSpace: 'nowrap', 
-              textOverflow: 'ellipsis', 
-              overflow: 'hidden' 
-            }}>
+            <span style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
               {currentTrack?.title || "No Track Selected"}
             </span>
-            {isHiRes && <img src={highResIcon} style={{ height: '14px', flexShrink: 0 }} alt="Hi-Res" />}
+            {currentTrack && (
+              <img 
+                src={highResIcon} 
+                style={{ 
+                  height: '14px', 
+                  flexShrink: 0,
+                  transition: 'all 0.3s ease',
+                  // Glow green if hi-res, otherwise dim placeholder
+                  filter: isHiRes 
+                    ? 'brightness(1.2) drop-shadow(0px 0px 8px rgba(29, 185, 84, 0.8))' 
+                    : 'brightness(0.2) grayscale(1)'
+                }} 
+                alt="Hi-Res" 
+              />
+            )}
           </div>
-          <span style={{ 
-            fontSize: '0.8rem', 
-            opacity: 0.6, 
-            whiteSpace: 'nowrap', 
-            textOverflow: 'ellipsis', 
-            overflow: 'hidden' 
-          }}>
+          <span style={{ fontSize: '0.8rem', opacity: 0.6, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
             {currentTrack?.artist || "Unknown Artist"}
           </span>
         </div>
@@ -111,21 +110,12 @@ export default function PlayerBar({
           <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
             <img src={skipRevIcon} style={iconStyle} alt="Previous" />
           </button>
-          
           <button 
             onClick={togglePlayback} 
-            style={{ 
-              width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#fff', 
-              display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' 
-            }}
+            style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
           >
-            <img 
-              src={isPlaying ? pauseIcon : playIcon} 
-              style={{ width: '18px', height: '18px', filter: 'none' }} 
-              alt="Play/Pause" 
-            />
+            <img src={isPlaying ? pauseIcon : playIcon} style={{ width: '18px', height: '18px' }} alt="Play/Pause" />
           </button>
-
           <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
             <img src={skipFwdIcon} style={iconStyle} alt="Next" />
           </button>
@@ -134,11 +124,8 @@ export default function PlayerBar({
         {/* Progress Bar */}
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '15px' }}>
           <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px', textAlign: 'right' }}>{formatTime(progress)}</span>
-          <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', position: 'relative', cursor: 'pointer' }}>
-            <div style={{ 
-              width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, 
-              height: '100%', backgroundColor: '#1db954', borderRadius: '2px' 
-            }} />
+          <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', cursor: 'pointer' }}>
+            <div style={{ width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, height: '100%', backgroundColor: '#1db954', borderRadius: '2px' }} />
           </div>
           <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px' }}>
             {currentTrack ? formatTime(currentTrack.duration) : "0:00"}
@@ -146,11 +133,9 @@ export default function PlayerBar({
         </div>
       </div>
 
-      {/* Volume/Device Info */}
+      {/* Volume/Output */}
       <div style={{ width: '350px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-           <img src={outputIcon} style={{ width: '22px', height: '22px', filter: 'invert(1)', opacity: 0.7 }} alt="Output" />
-        </button>
+        <img src={outputIcon} style={{ width: '22px', height: '22px', filter: 'invert(1)', opacity: 0.7 }} alt="Output" />
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '1rem', opacity: 0.7 }}>🔊</span>
           <div style={{ width: '80px', height: '4px', backgroundColor: '#222', borderRadius: '2px' }}>

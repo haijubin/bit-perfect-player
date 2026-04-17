@@ -19,6 +19,9 @@ pub struct Track {
     pub file_path: String,
     pub cover_url: Option<String>,
     pub replay_gain: Option<f32>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u16>,
+    pub channels: Option<u16>,
 }
 
 pub fn init_db() -> Connection {
@@ -33,7 +36,10 @@ pub fn init_db() -> Connection {
             year INTEGER,
             duration REAL,
             file_path TEXT UNIQUE,
-            cover_url TEXT
+            cover_url TEXT,
+            sample_rate INTEGER,
+            bit_depth INTEGER,
+            channels INTEGER
         )",
         [],
     ).expect("Failed to create tracks table");
@@ -57,7 +63,8 @@ pub fn get_library() -> Result<Vec<Track>, String> {
     let mut stmt = conn.prepare("
         SELECT 
             t.id, t.title, t.artist, t.album, t.year, 
-            t.duration, t.file_path, t.cover_url, rg.track_gain 
+            t.duration, t.file_path, t.cover_url, rg.track_gain,
+            t.sample_rate, t.bit_depth, t.channels
         FROM tracks t
         LEFT JOIN replay_gain rg ON t.id = rg.track_id
     ").map_err(|e| e.to_string())?;
@@ -73,6 +80,9 @@ pub fn get_library() -> Result<Vec<Track>, String> {
             file_path: row.get(6)?,
             cover_url: row.get(7)?,
             replay_gain: row.get(8)?, 
+            sample_rate: row.get(9)?,
+            bit_depth: row.get(10)?,
+            channels: row.get(11)?,
         })
     }).map_err(|e| e.to_string())?
     .filter_map(|t| t.ok())
@@ -92,7 +102,7 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
     let scope = app.fs_scope();
     let _ = scope.allow_directory(&folder_path, true);
     
-    // Re-init to ensure tables exist
+    // Re-init to ensure tables/columns exist
     let conn = init_db();
 
     for entry in WalkDir::new(&folder_path)
@@ -111,6 +121,11 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
         let mut duration = 0.0;
         let mut cover_url = None;
         let mut track_gain: Option<f32> = None;
+        
+        // Technical Audio Properties
+        let mut sample_rate: Option<u32> = None;
+        let mut bit_depth: Option<u16> = None;
+        let mut channels: Option<u16> = None;
 
         if let Ok(src) = File::open(entry.path()) {
             let mss = MediaSourceStream::new(Box::new(src), Default::default());
@@ -118,8 +133,15 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             
             if let Ok(mut probed) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
                 if let Some(stream) = probed.format.tracks().iter().next() {
-                    if let Some(params) = &stream.codec_params.time_base {
-                        let n_frames = stream.codec_params.n_frames.unwrap_or(0);
+                    let cp = &stream.codec_params;
+                    
+                    // Extract Audio Properties
+                    sample_rate = cp.sample_rate;
+                    bit_depth = cp.bits_per_sample.map(|b| b as u16);
+                    channels = cp.channels.map(|c| c.count() as u16);
+
+                    if let Some(params) = &cp.time_base {
+                        let n_frames = cp.n_frames.unwrap_or(0);
                         duration = n_frames as f64 * (params.numer as f64 / params.denom as f64);
                     }
                 }
@@ -134,7 +156,6 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
                                 if let Ok(y) = tag.value.to_string().parse::<i32>() { year = Some(y); }
                             },
                             _ => {
-                                // Checking for ReplayGain in the raw keys
                                 let key_string = tag.key.to_uppercase();
                                 if key_string.contains("REPLAYGAIN_TRACK_GAIN") {
                                     let val_str = tag.value.to_string().replace(" dB", "");
@@ -163,14 +184,13 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             cover_url = Some("/default.jpg".to_string());
         }
 
-        // Insert track info
+        // Insert track info with sample_rate, bit_depth, and channels
         let _ = conn.execute(
-            "INSERT OR REPLACE INTO tracks (title, artist, album, year, duration, file_path, cover_url) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![title, artist, album, year, duration, path_str, cover_url],
+            "INSERT OR REPLACE INTO tracks (title, artist, album, year, duration, file_path, cover_url, sample_rate, bit_depth, channels) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![title, artist, album, year, duration, path_str, cover_url, sample_rate, bit_depth, channels],
         );
 
-        // Get track ID and insert gain if found
         let track_id: i32 = conn.last_insert_rowid() as i32;
         if let Some(gain) = track_gain {
             let _ = conn.execute(
