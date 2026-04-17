@@ -128,9 +128,17 @@ export function useAudioPlayer() {
     playTrack(library[nextIndex]);
   };
 
+  const handleSeek = async (timeS: number) => {
+    try {
+      await invoke("seek_track", { timeS });
+    } catch (err) {
+      console.error("Seek failed:", err);
+    }
+  };
+
   return {
     library, currentTrack, progress, isPlaying, status, libraryPaths,
     rgEnabled, toggleRg, // Exporting new RG controls
-    handleRescan, handleAddPath, handleRemovePath, playTrack, togglePlayback, handleSkip
+    handleRescan, handleAddPath, handleRemovePath, playTrack, togglePlayback, handleSkip, handleSeek
   };
 }

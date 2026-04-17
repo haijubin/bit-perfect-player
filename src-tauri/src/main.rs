@@ -45,7 +45,8 @@ fn main() {
             crate::modules::scanner::remove_music_path, // New command registered here
             get_library_paths,
             crate::modules::player::start_bit_perfect_stream,
-            crate::modules::player::toggle_playback
+            crate::modules::player::toggle_playback,
+            crate::modules::player::seek_track
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

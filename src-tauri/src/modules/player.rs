@@ -1,24 +1,29 @@
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
-use rb::{SpscRb, RB, RbProducer}; // Added traits here
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use rb::{RB, RbProducer}; 
 use symphonia::core::audio::SampleBuffer;
 use tauri::Emitter;
 use crate::modules::decoder::DecodedStream;
 use crate::modules::audio_output::AudioEngine;
 use cpal::traits::StreamTrait;
 
+// --- CRITICAL: THE MISSING STRUCT DEFINITION ---
 pub struct PlayerState {
     pub active_stream: Mutex<Option<cpal::Stream>>,
-    pub elapsed_samples: Arc<AtomicU64>,
     pub is_playing: Arc<Mutex<bool>>,
+    pub elapsed_samples: Arc<AtomicU64>,
+    pub seek_pending: Arc<Mutex<Option<f64>>>,      
+    pub clear_buffer: Arc<AtomicBool>, 
 }
 
 impl Default for PlayerState {
     fn default() -> Self {
         Self {
             active_stream: Mutex::new(None),
-            elapsed_samples: Arc::new(AtomicU64::new(0)),
             is_playing: Arc::new(Mutex::new(false)),
+            elapsed_samples: Arc::new(AtomicU64::new(0)),
+            seek_pending: Arc::new(Mutex::new(None)),      
+            clear_buffer: Arc::new(AtomicBool::new(false)), 
         }
     }
 }
@@ -30,34 +35,59 @@ pub fn start_bit_perfect_stream(
     state: tauri::State<'_, PlayerState>,
     window: tauri::Window,
 ) -> Result<String, String> {
-    let stream_data_res = DecodedStream::new(&file_path, replay_gain)?;
+    let mut stream_data = DecodedStream::new(&file_path, replay_gain)?;
     let engine = AudioEngine::new()?;
-    let sample_rate = engine.config.sample_rate as f32; // Fixed access
+    let sample_rate = engine.config.sample_rate as f32; 
+    let channels = engine.config.channels as f32;
 
     state.elapsed_samples.store(0, Ordering::SeqCst);
-    let ring_buffer = SpscRb::<f32>::new(65536);
+    let ring_buffer = rb::SpscRb::<f32>::new(65536);
     let (producer, consumer) = (ring_buffer.producer(), ring_buffer.consumer());
 
-    let stream = engine.create_stream(consumer, Arc::clone(&state.elapsed_samples))?;
+    let stream = engine.create_stream(
+        consumer, 
+        Arc::clone(&state.elapsed_samples),
+        Arc::clone(&state.clear_buffer)
+    )?;
+    
     stream.play().map_err(|e| e.to_string())?;
     
     *state.active_stream.lock().unwrap() = Some(stream);
     *state.is_playing.lock().unwrap() = true;
 
+    // Progress Thread
     let elapsed_clone = Arc::clone(&state.elapsed_samples);
+    let window_clone = window.clone();
     std::thread::spawn(move || {
         loop {
-            // Divide by 2.0 for Stereo
-            let seconds = (elapsed_clone.load(Ordering::SeqCst) as f32 / 2.0) / sample_rate;
-            let _ = window.emit("progress", seconds);
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let samples = elapsed_clone.load(Ordering::SeqCst) as f32;
+            let seconds = (samples / channels) / sample_rate;
+            let _ = window_clone.emit("progress", seconds);
+            std::thread::sleep(std::time::Duration::from_millis(250));
         }
     });
 
-    let mut stream_data = stream_data_res;
+    // Decoding & Seek Thread
+    let seek_pending = Arc::clone(&state.seek_pending);
+    let clear_buffer = Arc::clone(&state.clear_buffer);
+    let elapsed_samples = Arc::clone(&state.elapsed_samples);
+
     std::thread::spawn(move || {
-        let mut sample_buf = None;
+        let mut sample_buf: Option<SampleBuffer<f32>> = None;
         loop {
+            // Check for Seek
+            {
+                let mut pending = seek_pending.lock().unwrap();
+                if let Some(time_s) = *pending {
+                    if let Ok(_) = stream_data.seek(time_s) {
+                        clear_buffer.store(true, Ordering::SeqCst);
+                        let new_pos = (time_s * sample_rate as f64 * channels as f64) as u64;
+                        elapsed_samples.store(new_pos, Ordering::SeqCst);
+                    }
+                    *pending = None;
+                }
+            }
+
             let packet = match stream_data.reader.next_packet() {
                 Ok(p) => p,
                 Err(_) => break,
@@ -78,8 +108,12 @@ pub fn start_bit_perfect_stream(
 
                     let mut i = 0;
                     while i < samples.len() {
+                        if seek_pending.lock().unwrap().is_some() { break; }
                         let written = producer.write(&samples[i..]).unwrap_or(0);
-                        if written == 0 { std::thread::yield_now(); }
+                        if written == 0 { 
+                            std::thread::yield_now();
+                            continue; 
+                        }
                         i += written;
                     }
                 }
@@ -90,7 +124,7 @@ pub fn start_bit_perfect_stream(
     Ok("Playing".into())
 }
 
-#[tauri::command] // Added this macro to fix the main.rs error
+#[tauri::command]
 pub fn toggle_playback(state: tauri::State<'_, PlayerState>) -> Result<bool, String> {
     let stream_lock = state.active_stream.lock().map_err(|_| "Failed to lock stream")?;
     let mut playing_lock = state.is_playing.lock().map_err(|_| "Failed to lock status")?;
@@ -107,4 +141,11 @@ pub fn toggle_playback(state: tauri::State<'_, PlayerState>) -> Result<bool, Str
     } else {
         Err("No active stream".into())
     }
+}
+
+#[tauri::command]
+pub fn seek_track(time_s: f64, state: tauri::State<'_, PlayerState>) -> Result<(), String> {
+    let mut pending = state.seek_pending.lock().unwrap();
+    *pending = Some(time_s);
+    Ok(())
 }

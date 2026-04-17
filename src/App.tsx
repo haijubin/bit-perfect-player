@@ -9,29 +9,44 @@ import { useAudioPlayer, Track } from "./hooks/useAudioPlayer";
 
 export type ViewMode = "NowPlaying" | "Library" | "YouTube" | "Albums" | "Artists" | "Genres" | "Playlists" | "Trending";
 
-// Updated Tab Types to Title Case
+// Tab Types
 export type LibTab = "Album View" | "List View" | "Paths"; 
 
 export type NowPlayingSubTab = "Lyrics" | "Details";
 
 function App() {
   const {
-    library, currentTrack, progress, isPlaying, status, libraryPaths,
-    rgEnabled, toggleRg,
-    handleRescan, handleAddPath, handleRemovePath, playTrack, togglePlayback, handleSkip
+    library, 
+    currentTrack, 
+    progress, 
+    isPlaying, 
+    status, 
+    libraryPaths,
+    rgEnabled, 
+    toggleRg,
+    handleRescan, 
+    handleAddPath, 
+    handleRemovePath, 
+    playTrack, 
+    togglePlayback, 
+    handleSkip,
+    handleSeek // This must be returned by useAudioPlayer.ts
   } = useAudioPlayer();
 
   const [view, setView] = useState<ViewMode>("Library");
-  const [libTab, setLibTab] = useState<LibTab>("Album View"); // Default updated
+  const [libTab, setLibTab] = useState<LibTab>("Album View"); 
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingSubTab>("Lyrics");
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
 
+  // Helper to format seconds into M:SS
   const formatTime = (s: number) => {
+    if (isNaN(s)) return "0:00";
     const mins = Math.floor(s / 60);
     const secs = Math.floor(s % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Memoized album grouping for performance
   const albumGrid = useMemo(() => {
     const albums: Record<string, Track[]> = {};
     library.forEach(t => {
@@ -39,15 +54,28 @@ function App() {
       albums[t.album].push(t);
     });
     return Object.entries(albums).map(([name, tracks]) => ({
-      album: name, artist: tracks[0].artist, cover_url: tracks[0].cover_url, year: tracks[0].year, tracks
+      album: name, 
+      artist: tracks[0].artist, 
+      cover_url: tracks[0].cover_url, 
+      year: tracks[0].year, 
+      tracks
     }));
   }, [library]);
 
   return (
-    <div className="app-container" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: '#000', color: '#fff' }}>
+    <div className="app-container" style={{ 
+      display: 'flex', 
+      height: '100vh', 
+      width: '100vw', 
+      overflow: 'hidden', 
+      backgroundColor: '#000', 
+      color: '#fff',
+      fontFamily: 'Inter, system-ui, Avenir, Helvetica, Arial, sans-serif'
+    }}>
       <Sidebar view={view} setView={setView} status={status} />
+      
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
           {view === "Library" && (
             <Library 
               libTab={libTab} 
@@ -63,13 +91,33 @@ function App() {
               setView={setView}
             />
           )}
-          {view === "NowPlaying" && <NowPlaying currentTrack={currentTrack} nowPlayingTab={nowPlayingTab} setNowPlayingTab={setNowPlayingTab} />}
-          {view === "Albums" && <Albums selectedAlbum={selectedAlbum} albumGrid={albumGrid} playTrack={playTrack} />}
+
+          {view === "NowPlaying" && (
+            <NowPlaying 
+              currentTrack={currentTrack} 
+              nowPlayingTab={nowPlayingTab} 
+              setNowPlayingTab={setNowPlayingTab} 
+            />
+          )}
+
+          {view === "Albums" && (
+            <Albums 
+              selectedAlbum={selectedAlbum} 
+              albumGrid={albumGrid} 
+              playTrack={playTrack} 
+            />
+          )}
+
           {view === "YouTube" && <YouTube />}
+
           {["Artists", "Genres", "Playlists", "Trending"].includes(view) && (
-            <div style={{ padding: '60px', opacity: 0.5 }}><h2>{view}</h2><p>Coming Soon</p></div>
+            <div style={{ padding: '60px', opacity: 0.5 }}>
+              <h2>{view}</h2>
+              <p>Coming Soon</p>
+            </div>
           )}
         </div>
+
         <PlayerBar 
           currentTrack={currentTrack} 
           isPlaying={isPlaying} 
@@ -78,6 +126,7 @@ function App() {
           toggleRg={toggleRg}
           togglePlayback={togglePlayback} 
           handleSkip={handleSkip} 
+          handleSeek={handleSeek} 
           formatTime={formatTime}
         />
       </main>

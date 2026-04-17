@@ -1,8 +1,9 @@
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::formats::{FormatOptions, FormatReader};
+use symphonia::core::formats::{FormatReader, SeekMode, SeekTo, FormatOptions};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::Time;
 use std::fs::File;
 
 pub struct DecodedStream {
@@ -36,5 +37,18 @@ impl DecodedStream {
             decoder,
             multiplier,
         })
+    }
+
+    pub fn seek(&mut self, time_s: f64) -> Result<(), String> {
+        self.reader.seek(
+            SeekMode::Accurate,
+            SeekTo::Time {
+                time: Time::from(time_s),
+                track_id: None,
+            },
+        ).map_err(|e| e.to_string())?;
+
+        self.decoder.reset();
+        Ok(())
     }
 }

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import playIcon from "../assets/icons/audio/play.svg";
 import pauseIcon from "../assets/icons/audio/pause.svg";
@@ -25,6 +25,7 @@ interface PlayerBarProps {
   progress: number;
   togglePlayback: () => void;
   handleSkip: (forward: boolean) => void;
+  handleSeek: (timeS: number) => void; 
   formatTime: (s: number) => string;
 }
 
@@ -34,12 +35,23 @@ export default function PlayerBar({
   progress,
   togglePlayback,
   handleSkip,
+  handleSeek,
   formatTime
 }: PlayerBarProps) {
   
+  // Local state to manage slider while user is actively dragging
+  const [isDragging, setIsDragging] = useState(false);
+  const [localProgress, setLocalProgress] = useState(0);
+
+  // Sync local progress with global progress when not dragging
+  useEffect(() => {
+    if (!isDragging) {
+      setLocalProgress(progress);
+    }
+  }, [progress, isDragging]);
+
   const DEFAULT_ART = "/default.jpg";
 
-  // Logic to determine if track is high resolution (Greater than CD quality)
   const isHiRes = useMemo(() => {
     if (!currentTrack) return false;
     const rate = currentTrack.sample_rate || 0;
@@ -53,6 +65,22 @@ export default function PlayerBar({
     if (!path || path === "" || path === "null") return DEFAULT_ART;
     if (path.startsWith("/default")) return path;
     return convertFileSrc(path);
+  };
+
+  const seekPercentage = useMemo(() => {
+    const duration = currentTrack?.duration || 1;
+    return (localProgress / duration) * 100;
+  }, [localProgress, currentTrack]);
+
+  // Defensive wrapper for seeking
+  const onSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value);
+    setLocalProgress(val);
+    if (typeof handleSeek === "function") {
+      handleSeek(val);
+    } else {
+      console.warn("handleSeek is not defined in PlayerBar props");
+    }
   };
 
   return (
@@ -89,7 +117,6 @@ export default function PlayerBar({
                   height: '14px', 
                   flexShrink: 0,
                   transition: 'all 0.3s ease',
-                  // Glow green if hi-res, otherwise dim placeholder
                   filter: isHiRes 
                     ? 'brightness(1.2) drop-shadow(0px 0px 8px rgba(29, 185, 84, 0.8))' 
                     : 'brightness(0.2) grayscale(1)'
@@ -121,19 +148,43 @@ export default function PlayerBar({
           </button>
         </div>
 
-        {/* Progress Bar */}
+        {/* Progress Bar (Interactive Slider) */}
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px', textAlign: 'right' }}>{formatTime(progress)}</span>
-          <div style={{ flex: 1, height: '4px', backgroundColor: '#222', borderRadius: '2px', cursor: 'pointer' }}>
-            <div style={{ width: `${(progress / (currentTrack?.duration || 1)) * 100}%`, height: '100%', backgroundColor: '#1db954', borderRadius: '2px' }} />
+          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px', textAlign: 'right' }}>
+            {formatTime(localProgress)}
+          </span>
+          
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', position: 'relative' }}>
+            <input 
+              type="range"
+              min="0"
+              max={currentTrack?.duration || 1}
+              value={localProgress}
+              step="0.1"
+              onMouseDown={() => setIsDragging(true)}
+              onMouseUp={() => setIsDragging(false)}
+              onChange={onSeekChange}
+              className="seek-slider"
+              style={{
+                width: '100%',
+                height: '4px',
+                appearance: 'none',
+                backgroundColor: '#222',
+                borderRadius: '2px',
+                outline: 'none',
+                cursor: 'pointer',
+                background: `linear-gradient(to right, #1db954 ${seekPercentage}%, #222 ${seekPercentage}%)`
+              }}
+            />
           </div>
+
           <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px' }}>
             {currentTrack ? formatTime(currentTrack.duration) : "0:00"}
           </span>
         </div>
       </div>
 
-      {/* Volume/Output */}
+      {/* Volume/Output (Placeholder) */}
       <div style={{ width: '350px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
         <img src={outputIcon} style={{ width: '22px', height: '22px', filter: 'invert(1)', opacity: 0.7 }} alt="Output" />
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -143,6 +194,22 @@ export default function PlayerBar({
           </div>
         </div>
       </div>
+
+      <style>{`
+        .seek-slider::-webkit-slider-thumb {
+          appearance: none;
+          width: 12px;
+          height: 12px;
+          background: #fff;
+          border-radius: 50%;
+          cursor: pointer;
+          opacity: 0;
+          transition: opacity 0.2s;
+        }
+        .seek-slider:hover::-webkit-slider-thumb {
+          opacity: 1;
+        }
+      `}</style>
     </footer>
   );
 }
