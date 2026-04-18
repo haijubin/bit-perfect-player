@@ -1,214 +1,223 @@
-import { useMemo, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import playIcon from "../assets/icons/audio/play.svg";
-import pauseIcon from "../assets/icons/audio/pause.svg";
-import skipFwdIcon from "../assets/icons/audio/skip_fwd.svg";
-import skipRevIcon from "../assets/icons/audio/skip_rev.svg";
-import highResIcon from "../assets/icons/audio/High_Res_Audio.svg";
-import outputIcon from "../assets/icons/audio/output.svg";
-
-interface Track {
-  id: number;
-  file_path: string;
-  title: string;
-  artist: string;
-  cover_url: string;
-  duration: number;
-  replay_gain: number | null;
-  sample_rate: number | null;
-  bit_depth: number | null;
-}
 
 interface PlayerBarProps {
-  currentTrack: Track | null;
+  currentTrack: any;
   isPlaying: boolean;
   progress: number;
+  rgEnabled: boolean;
+  toggleRg: () => void;
   togglePlayback: () => void;
-  handleSkip: (forward: boolean) => void;
-  handleSeek: (timeS: number) => void; 
+  handleSkip: (dir: "next" | "prev") => void;
+  handleSeek: (time: number) => void;
   formatTime: (s: number) => string;
+  onOutputClick?: () => void; // Restored output selector prop
 }
 
 export default function PlayerBar({
   currentTrack,
   isPlaying,
   progress,
+  rgEnabled,
+  toggleRg,
   togglePlayback,
   handleSkip,
   handleSeek,
-  formatTime
+  formatTime,
+  onOutputClick
 }: PlayerBarProps) {
-  
-  // Local state to manage slider while user is actively dragging
+  const [localProgress, setLocalProgress] = useState(progress);
   const [isDragging, setIsDragging] = useState(false);
-  const [localProgress, setLocalProgress] = useState(0);
 
-  // Sync local progress with global progress when not dragging
   useEffect(() => {
     if (!isDragging) {
       setLocalProgress(progress);
     }
   }, [progress, isDragging]);
 
-  const DEFAULT_ART = "/default.jpg";
-
-  const isHiRes = useMemo(() => {
-    if (!currentTrack) return false;
-    const rate = currentTrack.sample_rate || 0;
-    const depth = currentTrack.bit_depth || 0;
-    return depth > 16 || rate > 44100;
-  }, [currentTrack]);
-
-  const iconStyle = { width: '20px', height: '20px', filter: 'invert(1)' };
-
-  const getArtPath = (path: string | null | undefined) => {
-    if (!path || path === "" || path === "null") return DEFAULT_ART;
-    if (path.startsWith("/default")) return path;
-    return convertFileSrc(path);
-  };
-
-  const seekPercentage = useMemo(() => {
-    const duration = currentTrack?.duration || 1;
-    return (localProgress / duration) * 100;
-  }, [localProgress, currentTrack]);
-
-  // Defensive wrapper for seeking
-  const onSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    setLocalProgress(val);
-    if (typeof handleSeek === "function") {
-      handleSeek(val);
-    } else {
-      console.warn("handleSeek is not defined in PlayerBar props");
-    }
-  };
+  const duration = currentTrack?.duration || 0;
+  
+  // Calculate percentage for the green fill effect
+  const progressPercent = duration > 0 ? (localProgress / duration) * 100 : 0;
 
   return (
-    <footer style={{ 
-      height: '95px', backgroundColor: '#050505', borderTop: '1px solid #111', 
-      display: 'flex', alignItems: 'center', padding: '0 25px', justifyContent: 'space-between', zIndex: 10 
-    }}>
-      {/* Track Info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '350px' }}>
-        <div style={{ 
-          width: '52px', height: '52px', background: '#111', borderRadius: '6px', overflow: 'hidden', flexShrink: 0 
-        }}>
-          {currentTrack && (
+    <footer className="player-bar">
+      {/* Left: Album Art & Track Info */}
+      <div className="track-info">
+        <div className="cover-container">
+          {currentTrack?.cover_url ? (
             <img 
-              src={getArtPath(currentTrack.cover_url)} 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              src={convertFileSrc(currentTrack.cover_url)} 
               alt="cover" 
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                if (!target.src.endsWith(DEFAULT_ART)) target.src = DEFAULT_ART;
-              }}
+              className="album-art"
             />
+          ) : (
+            <div className="art-placeholder">🎵</div>
           )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-            <span style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-              {currentTrack?.title || "No Track Selected"}
-            </span>
-            {currentTrack && (
-              <img 
-                src={highResIcon} 
-                style={{ 
-                  height: '14px', 
-                  flexShrink: 0,
-                  transition: 'all 0.3s ease',
-                  filter: isHiRes 
-                    ? 'brightness(1.2) drop-shadow(0px 0px 8px rgba(29, 185, 84, 0.8))' 
-                    : 'brightness(0.2) grayscale(1)'
-                }} 
-                alt="Hi-Res" 
-              />
-            )}
-          </div>
-          <span style={{ fontSize: '0.8rem', opacity: 0.6, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-            {currentTrack?.artist || "Unknown Artist"}
-          </span>
+        <div className="text-container">
+          <div className="track-title">{currentTrack?.title || "Not Playing"}</div>
+          <div className="track-artist">{currentTrack?.artist || "Unknown Artist"}</div>
         </div>
       </div>
 
-      {/* Main Controls */}
-      <div style={{ flex: 1, maxWidth: '600px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '25px' }}>
-          <button onClick={() => handleSkip(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-            <img src={skipRevIcon} style={iconStyle} alt="Previous" />
+      {/* Center: Controls & Seekbar */}
+      <div className="player-controls">
+        <div className="button-row">
+          <button className="ctrl-btn" onClick={() => handleSkip("prev")}>⏮</button>
+          <button className="play-btn" onClick={togglePlayback}>
+            {isPlaying ? "⏸" : "▶"}
           </button>
-          <button 
-            onClick={togglePlayback} 
-            style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-          >
-            <img src={isPlaying ? pauseIcon : playIcon} style={{ width: '18px', height: '18px' }} alt="Play/Pause" />
-          </button>
-          <button onClick={() => handleSkip(true)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-            <img src={skipFwdIcon} style={iconStyle} alt="Next" />
-          </button>
+          <button className="ctrl-btn" onClick={() => handleSkip("next")}>⏭</button>
         </div>
 
-        {/* Progress Bar (Interactive Slider) */}
-        <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px', textAlign: 'right' }}>
-            {formatTime(localProgress)}
-          </span>
-          
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', position: 'relative' }}>
-            <input 
-              type="range"
-              min="0"
-              max={currentTrack?.duration || 1}
-              value={localProgress}
-              step="0.1"
-              onMouseDown={() => setIsDragging(true)}
-              onMouseUp={() => setIsDragging(false)}
-              onChange={onSeekChange}
-              className="seek-slider"
-              style={{
-                width: '100%',
-                height: '4px',
-                appearance: 'none',
-                backgroundColor: '#222',
-                borderRadius: '2px',
-                outline: 'none',
-                cursor: 'pointer',
-                background: `linear-gradient(to right, #1db954 ${seekPercentage}%, #222 ${seekPercentage}%)`
-              }}
-            />
-          </div>
-
-          <span style={{ fontSize: '0.7rem', opacity: 0.4, width: '40px' }}>
-            {currentTrack ? formatTime(currentTrack.duration) : "0:00"}
-          </span>
+        <div className="seek-container">
+          <span className="time-label">{formatTime(localProgress)}</span>
+          <input
+            type="range"
+            min={0}
+            max={duration}
+            value={localProgress}
+            onMouseDown={() => setIsDragging(true)}
+            onChange={(e) => setLocalProgress(Number(e.target.value))}
+            onMouseUp={() => {
+              setIsDragging(false);
+              handleSeek(localProgress);
+            }}
+            className="maestro-slider"
+            style={{
+              // This creates the "progress" fill effect
+              background: `linear-gradient(to right, #1db954 ${progressPercent}%, #4d4d4d ${progressPercent}%)`
+            }}
+          />
+          <span className="time-label">{formatTime(duration)}</span>
         </div>
       </div>
 
-      {/* Volume/Output (Placeholder) */}
-      <div style={{ width: '350px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '20px' }}>
-        <img src={outputIcon} style={{ width: '22px', height: '22px', filter: 'invert(1)', opacity: 0.7 }} alt="Output" />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '1rem', opacity: 0.7 }}>🔊</span>
-          <div style={{ width: '80px', height: '4px', backgroundColor: '#222', borderRadius: '2px' }}>
-            <div style={{ width: '70%', height: '100%', backgroundColor: '#fff', borderRadius: '2px' }} />
-          </div>
-        </div>
+      {/* Right: ReplayGain & Output Selector */}
+      <div className="extra-controls">
+        <button 
+          onClick={toggleRg}
+          className={`icon-btn rg-btn ${rgEnabled ? 'active' : ''}`}
+          title="Toggle ReplayGain"
+        >
+          RG
+        </button>
+        <button 
+          className="icon-btn" 
+          onClick={onOutputClick}
+          title="Select Audio Output"
+        >
+          🔊
+        </button>
       </div>
 
       <style>{`
-        .seek-slider::-webkit-slider-thumb {
-          appearance: none;
-          width: 12px;
-          height: 12px;
-          background: #fff;
-          border-radius: 50%;
-          cursor: pointer;
-          opacity: 0;
-          transition: opacity 0.2s;
+        .player-bar {
+          height: 90px;
+          background-color: #050505;
+          border-top: 1px solid #111;
+          display: grid;
+          grid-template-columns: 30% 40% 30%;
+          align-items: center;
+          padding: 0 20px;
+          z-index: 100;
         }
-        .seek-slider:hover::-webkit-slider-thumb {
+
+        .track-info {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .cover-container {
+          width: 56px;
+          height: 56px;
+          background-color: #111;
+          border-radius: 4px;
+          overflow: hidden;
+          flex-shrink: 0;
+          border: 1px solid #222;
+        }
+
+        .album-art { width: 100%; height: 100%; object-fit: cover; }
+
+        .art-placeholder {
+          width: 100%; height: 100%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 1.5rem; opacity: 0.3;
+        }
+
+        .text-container { overflow: hidden; }
+
+        .track-title {
+          font-weight: 600; font-size: 0.85rem;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          color: #fff;
+        }
+
+        .track-artist { font-size: 0.75rem; color: #b3b3b3; margin-top: 4px; }
+
+        .player-controls {
+          display: flex; flex-direction: column; align-items: center; gap: 8px;
+        }
+
+        .button-row { display: flex; align-items: center; gap: 24px; }
+
+        .ctrl-btn {
+          background: none; border: none; color: #b3b3b3;
+          font-size: 1.2rem; cursor: pointer; transition: color 0.2s;
+        }
+        .ctrl-btn:hover { color: #fff; }
+
+        .play-btn {
+          background: #fff; border: none; width: 32px; height: 32px;
+          border-radius: 50%; display: flex; align-items: center;
+          justify-content: center; cursor: pointer; font-size: 1rem;
+        }
+
+        .seek-container {
+          display: flex; width: 100%; align-items: center; gap: 10px;
+        }
+
+        .time-label {
+          font-size: 0.7rem; color: #a7a7a7; width: 35px;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .maestro-slider {
+          flex: 1; height: 4px; appearance: none;
+          border-radius: 2px; outline: none; cursor: pointer;
+          transition: background 0.1s ease;
+        }
+
+        /* Thumb Styling */
+        .maestro-slider::-webkit-slider-thumb {
+          appearance: none; width: 12px; height: 12px;
+          background: #fff; border-radius: 50%;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+          opacity: 0; transition: opacity 0.2s;
+        }
+
+        .seek-container:hover .maestro-slider::-webkit-slider-thumb {
           opacity: 1;
         }
+
+        .extra-controls {
+          display: flex; justify-content: flex-end; align-items: center; gap: 15px;
+        }
+
+        .icon-btn {
+          background: transparent; border: none; color: #b3b3b3;
+          font-size: 1.1rem; cursor: pointer; transition: color 0.2s;
+        }
+        .icon-btn:hover { color: #fff; }
+
+        .rg-btn {
+          border: 1px solid #444; font-size: 0.6rem;
+          font-weight: 800; padding: 3px 6px; border-radius: 3px;
+        }
+        .rg-btn.active { border-color: #1db954; color: #1db954; }
       `}</style>
     </footer>
   );

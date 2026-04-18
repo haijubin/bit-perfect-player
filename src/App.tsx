@@ -5,6 +5,7 @@ import Library from "./pages/Library";
 import NowPlaying from "./pages/NowPlaying";
 import Albums from "./pages/Albums";
 import YouTube from "./pages/YouTube";
+import Artists from "./pages/Artists"; // Added Import
 import { useAudioPlayer, Track } from "./hooks/useAudioPlayer";
 
 export type ViewMode = "NowPlaying" | "Library" | "YouTube" | "Albums" | "Artists" | "Genres" | "Playlists" | "Trending";
@@ -30,7 +31,7 @@ function App() {
     playTrack, 
     togglePlayback, 
     handleSkip,
-    handleSeek // This must be returned by useAudioPlayer.ts
+    handleSeek 
   } = useAudioPlayer();
 
   const [view, setView] = useState<ViewMode>("Library");
@@ -76,6 +77,7 @@ function App() {
       
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+          {/* 1. Library View */}
           {view === "Library" && (
             <Library 
               libTab={libTab} 
@@ -92,6 +94,7 @@ function App() {
             />
           )}
 
+          {/* 2. Now Playing View */}
           {view === "NowPlaying" && (
             <NowPlaying 
               currentTrack={currentTrack} 
@@ -100,6 +103,7 @@ function App() {
             />
           )}
 
+          {/* 3. Album Detail View */}
           {view === "Albums" && (
             <Albums 
               selectedAlbum={selectedAlbum} 
@@ -108,9 +112,22 @@ function App() {
             />
           )}
 
+          {/* 4. Artist View */}
+          {view === "Artists" && (
+            <Artists 
+              albumGrid={albumGrid} 
+              onSelectAlbum={(albumName) => {
+                setSelectedAlbum(albumName);
+                setView("Albums");
+              }} 
+            />
+          )}
+
+          {/* 5. YouTube View */}
           {view === "YouTube" && <YouTube />}
 
-          {["Artists", "Genres", "Playlists", "Trending"].includes(view) && (
+          {/* Placeholders for remaining features */}
+          {["Genres", "Playlists", "Trending"].includes(view) && (
             <div style={{ padding: '60px', opacity: 0.5 }}>
               <h2>{view}</h2>
               <p>Coming Soon</p>
