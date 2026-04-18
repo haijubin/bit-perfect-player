@@ -2,7 +2,7 @@ use walkdir::WalkDir;
 use rusqlite::{params, Connection};
 use serde::{Serialize, Deserialize};
 use std::fs::File;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt; 
 use symphonia::core::meta::StandardTagKey;
 use symphonia::core::io::MediaSourceStream;
@@ -24,8 +24,13 @@ pub struct Track {
     pub channels: Option<u16>,
 }
 
-pub fn init_db() -> Connection {
-    let conn = Connection::open("library.db").expect("Failed to open database");
+/// Initializes the database in the user's local data directory.
+pub fn init_db(app: &AppHandle) -> Connection {
+    let app_dir = app.path().app_data_dir().expect("Failed to get app dir");
+    let _ = std::fs::create_dir_all(&app_dir);
+    let db_path = app_dir.join("library.db");
+
+    let conn = Connection::open(db_path).expect("Failed to open database");
     
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tracks (
@@ -45,6 +50,11 @@ pub fn init_db() -> Connection {
     ).expect("Failed to create tracks table");
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS library_paths (path TEXT PRIMARY KEY)",
+        [],
+    ).expect("Failed to create library_paths table");
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS replay_gain (
             track_id INTEGER PRIMARY KEY,
             track_gain REAL,
@@ -57,8 +67,8 @@ pub fn init_db() -> Connection {
 }
 
 #[tauri::command]
-pub fn get_library() -> Result<Vec<Track>, String> {
-    let conn = Connection::open("library.db").map_err(|e| e.to_string())?;
+pub fn get_library(app: AppHandle) -> Result<Vec<Track>, String> {
+    let conn = init_db(&app);
     
     let mut stmt = conn.prepare("
         SELECT 
@@ -93,18 +103,16 @@ pub fn get_library() -> Result<Vec<Track>, String> {
 
 #[tauri::command]
 pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Vec<Track>, String> {
-    let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
+    let conn = init_db(&app);
 
     let _ = conn.execute(
         "INSERT OR IGNORE INTO library_paths (path) VALUES (?1)",
         [&folder_path],
     );
+
     let scope = app.fs_scope();
     let _ = scope.allow_directory(&folder_path, true);
     
-    // Re-init to ensure tables/columns exist
-    let conn = init_db();
-
     for entry in WalkDir::new(&folder_path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -122,7 +130,6 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
         let mut cover_url = None;
         let mut track_gain: Option<f32> = None;
         
-        // Technical Audio Properties
         let mut sample_rate: Option<u32> = None;
         let mut bit_depth: Option<u16> = None;
         let mut channels: Option<u16> = None;
@@ -134,8 +141,6 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             if let Ok(mut probed) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
                 if let Some(stream) = probed.format.tracks().iter().next() {
                     let cp = &stream.codec_params;
-                    
-                    // Extract Audio Properties
                     sample_rate = cp.sample_rate;
                     bit_depth = cp.bits_per_sample.map(|b| b as u16);
                     channels = cp.channels.map(|c| c.count() as u16);
@@ -159,9 +164,7 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
                                 let key_string = tag.key.to_uppercase();
                                 if key_string.contains("REPLAYGAIN_TRACK_GAIN") {
                                     let val_str = tag.value.to_string().replace(" dB", "");
-                                    if let Ok(val) = val_str.parse::<f32>() {
-                                        track_gain = Some(val);
-                                    }
+                                    if let Ok(val) = val_str.parse::<f32>() { track_gain = Some(val); }
                                 }
                             }
                         }
@@ -184,7 +187,6 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
             cover_url = Some("/default.jpg".to_string());
         }
 
-        // Insert track info with sample_rate, bit_depth, and channels
         let _ = conn.execute(
             "INSERT OR REPLACE INTO tracks (title, artist, album, year, duration, file_path, cover_url, sample_rate, bit_depth, channels) 
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -200,12 +202,12 @@ pub async fn scan_music_folder(app: AppHandle, folder_path: String) -> Result<Ve
         }
     }
 
-    get_library()
+    get_library(app)
 }
 
 #[tauri::command]
-pub fn remove_music_path(folder_path: String) -> Result<(), String> {
-    let conn = crate::modules::database::get_db_connection().map_err(|e| e.to_string())?;
+pub fn remove_music_path(app: AppHandle, folder_path: String) -> Result<(), String> {
+    let conn = init_db(&app);
     let _ = conn.execute(
         "DELETE FROM tracks WHERE file_path LIKE ?1 || '%'",
         [&folder_path],
