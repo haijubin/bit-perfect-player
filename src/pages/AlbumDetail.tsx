@@ -1,5 +1,4 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import playIcon from "../assets/icons/audio/play.svg";
 
 interface Track {
   id: number;

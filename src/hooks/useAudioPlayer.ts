@@ -119,7 +119,7 @@ export function useAudioPlayer() {
     } catch (err) { setIsPlaying(isPlaying); }
   };
 
-  const handleSkip = (forward: boolean) => {
+  const handleSkip = (forward: string) => {
     if (!currentTrack || library.length === 0) return;
     const currentIndex = library.findIndex(t => t.id === currentTrack.id);
     let nextIndex = forward 

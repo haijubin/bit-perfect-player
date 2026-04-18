@@ -25,21 +25,20 @@ impl AudioEngine {
         let stream = self.device.build_output_stream(
             &self.config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // 1. Clear the old buffer immediately if a seek occurred
+                // 1. Clear buffer if seeking
                 if clear_buffer_flag.load(Ordering::SeqCst) {
                     let mut dummy = [0.0f32; 1024];
                     while consumer.read(&mut dummy).unwrap_or(0) > 0 {}
                     clear_buffer_flag.store(false, Ordering::SeqCst);
                 }
 
-                // 2. High-performance batch read
+                // 2. Optimized BATCH read (much faster than one-by-one)
                 let read_count = consumer.read(data).unwrap_or(0);
                 
-                // 3. Track EXACTLY what the hardware has consumed
-                // This batch update prevents the atomic contention that caused your flickering!
+                // 3. Update progress in one hit
                 elapsed_samples.fetch_add(read_count as u64, Ordering::SeqCst);
-                
-                // 4. Fill the rest of the buffer with silence if we run out of samples
+
+                // 4. Fill silence if underrun
                 if read_count < data.len() {
                     for sample in &mut data[read_count..] {
                         *sample = 0.0;
@@ -52,4 +51,5 @@ impl AudioEngine {
 
         Ok(stream)
     }
+
 }
