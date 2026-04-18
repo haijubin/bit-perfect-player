@@ -37,66 +37,64 @@ pub fn start_bit_perfect_stream(
     let mut stream_data = DecodedStream::new(&file_path, replay_gain)?;
     let engine = AudioEngine::new()?;
 
-    // --- CRITICAL FIX: Get File Specs for Math ---
-    // We use these for UI and Seek calculations
     let file_sample_rate = stream_data.sample_rate as f64;
     let file_channels = stream_data.channels as f64;
 
     state.elapsed_samples.store(0, Ordering::SeqCst);
+    state.clear_buffer.store(false, Ordering::SeqCst);
+    
     let ring_buffer = rb::SpscRb::<f32>::new(65536);
     let (producer, consumer) = (ring_buffer.producer(), ring_buffer.consumer());
 
+    // Pass elapsed_samples back into the audio thread!
     let stream = engine.create_stream(
         consumer, 
-        Arc::clone(&state.elapsed_samples),
+        Arc::clone(&state.elapsed_samples), 
         Arc::clone(&state.clear_buffer)
     )?;
-    
     stream.play().map_err(|e| e.to_string())?;
     
     *state.active_stream.lock().unwrap() = Some(stream);
     *state.is_playing.lock().unwrap() = true;
 
-    // Progress Thread
+    // --- THREAD A: PROGRESS EMITTER ---
     let elapsed_clone = Arc::clone(&state.elapsed_samples);
     let window_clone = window.clone();
     std::thread::spawn(move || {
         loop {
             let samples = elapsed_clone.load(Ordering::SeqCst) as f64;
-            // Use file_channels and file_sample_rate for accurate UI timing
             let seconds = (samples / file_channels) / file_sample_rate;
             let _ = window_clone.emit("progress", seconds);
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     });
 
-    // Decoding & Seek Thread
+    // --- THREAD B: DECODING & SEEK LOOP ---
     let seek_pending = Arc::clone(&state.seek_pending);
     let clear_buffer = Arc::clone(&state.clear_buffer);
     let elapsed_samples = Arc::clone(&state.elapsed_samples);
 
     std::thread::spawn(move || {
         let mut sample_buf: Option<SampleBuffer<f32>> = None;
+
         loop {
-            // Check for Seek
+            // 1. Check for Seek Request
             {
                 let mut pending = seek_pending.lock().unwrap();
                 if let Some(time_s) = *pending {
                     if let Ok(_) = stream_data.seek(time_s) {
                         clear_buffer.store(true, Ordering::SeqCst);
-                        
-                        // --- MATH FIX ---
-                        // Calculate new sample position based on FILE specs
-                        let new_pos = (time_s * file_sample_rate * file_channels) as u64;
-                        elapsed_samples.store(new_pos, Ordering::SeqCst);
+                        let target_samples = (time_s * file_sample_rate * file_channels) as u64;
+                        elapsed_samples.store(target_samples, Ordering::SeqCst);
                     }
                     *pending = None;
                 }
             }
 
+            // 2. Decode next packet
             let packet = match stream_data.reader.next_packet() {
                 Ok(p) => p,
-                Err(_) => break,
+                Err(_) => break, // End of File
             };
 
             if let Ok(decoded) = stream_data.decoder.decode(&packet) {
@@ -112,14 +110,14 @@ pub fn start_bit_perfect_stream(
                         for s in samples.iter_mut() { *s *= stream_data.multiplier; }
                     }
 
+                    // 3. Write to Buffer
                     let mut i = 0;
                     while i < samples.len() {
-                        // Break if a seek is requested mid-decode
                         if seek_pending.lock().unwrap().is_some() { break; }
                         
                         let written = producer.write(&samples[i..]).unwrap_or(0);
                         if written == 0 { 
-                            std::thread::yield_now();
+                            std::thread::yield_now(); 
                             continue; 
                         }
                         i += written;
@@ -153,7 +151,7 @@ pub fn toggle_playback(state: tauri::State<'_, PlayerState>) -> Result<bool, Str
 
 #[tauri::command]
 pub fn seek_track(time_s: f64, state: tauri::State<'_, PlayerState>) -> Result<(), String> {
-    let mut pending = state.seek_pending.lock().unwrap();
+    let mut pending = state.seek_pending.lock().map_err(|_| "Failed to lock seek")?;
     *pending = Some(time_s);
     Ok(())
 }

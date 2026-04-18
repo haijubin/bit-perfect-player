@@ -17,45 +17,39 @@ impl AudioEngine {
     }
     
     pub fn create_stream(
-    &self,
-    mut consumer: rb::Consumer<f32>, // Added mut
-    elapsed_samples: Arc<AtomicU64>,
-    clear_buffer_flag: Arc<AtomicBool>,
-) -> Result<cpal::Stream, String> {
-    let channels = self.config.channels as usize;
-
-    let stream = self.device.build_output_stream(
-        &self.config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            // 1. Check for clear buffer (Flush)
-            if clear_buffer_flag.load(Ordering::SeqCst) {
-                let mut dummy = [0.0f32; 1024];
-                while consumer.read(&mut dummy).unwrap_or(0) > 0 {}
-                clear_buffer_flag.store(false, Ordering::SeqCst);
-            }
-
-            // 2. OPTIMIZED READ: Fill the hardware buffer in bulk
-            // Instead of 1-by-1, we read the entire 'data' slice size from the ringbuffer
-            let read_count = consumer.read(data).unwrap_or(0);
-            
-            // 3. Update the progress counter based on how many samples we actually got
-            elapsed_samples.fetch_add(read_count as u64, Ordering::SeqCst);
-
-            // 4. Zero-out the remainder of the buffer if the ringbuffer is empty 
-            // This prevents "looping" or "stuttering" noise at the end of a track
-            if read_count < data.len() {
-                for sample in &mut data[read_count..] {
-                    *sample = 0.0;
+        &self,
+        consumer: rb::Consumer<f32>,
+        elapsed_samples: Arc<AtomicU64>,
+        clear_buffer_flag: Arc<AtomicBool>,
+    ) -> Result<cpal::Stream, String> {
+        let stream = self.device.build_output_stream(
+            &self.config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // 1. Clear the old buffer immediately if a seek occurred
+                if clear_buffer_flag.load(Ordering::SeqCst) {
+                    let mut dummy = [0.0f32; 1024];
+                    while consumer.read(&mut dummy).unwrap_or(0) > 0 {}
+                    clear_buffer_flag.store(false, Ordering::SeqCst);
                 }
-            }
-        },
-        |err| {
-            // Only print if it's not a standard notification to reduce CLI spam
-            eprintln!("Stream error: {}", err);
-        },
-        None,
-    ).map_err(|e| e.to_string())?;
 
-    Ok(stream)
-}
+                // 2. High-performance batch read
+                let read_count = consumer.read(data).unwrap_or(0);
+                
+                // 3. Track EXACTLY what the hardware has consumed
+                // This batch update prevents the atomic contention that caused your flickering!
+                elapsed_samples.fetch_add(read_count as u64, Ordering::SeqCst);
+                
+                // 4. Fill the rest of the buffer with silence if we run out of samples
+                if read_count < data.len() {
+                    for sample in &mut data[read_count..] {
+                        *sample = 0.0;
+                    }
+                }
+            },
+            |err| eprintln!("Stream error: {}", err),
+            None,
+        ).map_err(|e| e.to_string())?;
+
+        Ok(stream)
+    }
 }
